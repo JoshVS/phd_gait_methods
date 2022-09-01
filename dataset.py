@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import cv2
 
@@ -6,51 +8,48 @@ from tqdm import tqdm
 import mediapipe as mp
 mp_pose = mp.solutions.pose
 
-def extract_keypoints(image):
-    my_pose = mp_pose.Pose(
-            static_image_mode = True,
-            model_complexity = 2,
-            enable_segmentation = True,
-            min_detection_confidence = 0.5
-        )
-    image_height, image_width,_ = image.shape
-    with my_pose as pose:
-        keypoints = pose.process(image)
-        if keypoints.pose_landmarks is not None:
-            for l in keypoints.pose_landmarks.landmark:
-                l.x *= image_width
-                l.y *= image_height
-    return keypoints
+DATASET_DIR = "../../Datasets/MoviesGuns/"
 
 
+class VideoDataset:
 
-def extract_from_video(filename, outfile_name):
-    cap = cv2.VideoCapture(filename)
-    length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    loop = tqdm(range(length))
+    def __init__(self, label_dir="labels/", info_dir="info/"):
+        self.label_dir = label_dir
+        self.info_dir = info_dir
+        self.skeletons = self._read_skeletons()
 
-    kp_arr = []
-    with open(outfile_name, "w") as out_file:
-        for i in loop:
-            curr_kp = []
-            _, frame = cap.read()
-            image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            kp = extract_keypoints(image)
-            if kp.pose_landmarks is not None:
-                for l in kp.pose_landmarks.landmark:
-                    curr_kp.append((l.x, l.y))
-            else:
-                curr_kp.append((-1, -1))
-            
-            kp_arr.append(curr_kp)
-            out_file.write(f"{curr_kp}\n")
-            
-            # cv2.imshow('frame',image)
-            # if cv2.waitKey(1) & 0xFF == ord('q'):
-            #     break
-            loop.set_postfix()
+    def _read_skeletons(self):
+        skeletons = []
+        for filename, info_name in zip(os.listdir(self.label_dir), os.listdir(self.info_dir)):
+            skeletons.append(self._read_file(self.label_dir + filename, self.info_dir + info_name))
+        return skeletons
 
-    cap.release()
+    
+    def _read_file(self, filename, info_name):
+        frames = []
+        with open(info_name, "r") as info_file:
+            info_text = info_file.read().strip()
+            info_arr = info_text.split(";")
+            info_dict = {}
+            for inf in info_arr:
+                k, v = inf.split(",")
+                v = int(v)
+                info_dict[k] = v
 
-extract_from_video("1.mp4", "kp_results.txt")
+        with open(filename, "r") as kp_file:
+            kp_arr = kp_file.read().strip().split("\n")
+            for frame in kp_arr:
+                kps = frame.split(";")
+                k_arr = []
+                for k in kps:
+                    points = k.split(",")
+                    p_arr = []
+                    for p in points:
+                        p_arr.append(int(p))
+                    k_arr.append(p_arr)
+                frames.append(k_arr)
+            return frames
+                    
+
+my_dataset = VideoDataset()
