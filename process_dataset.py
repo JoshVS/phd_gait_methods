@@ -50,10 +50,10 @@ def extract_from_video(filename, outfile_name, infofile_name):
                 for l in kp.pose_landmarks.landmark:
                     curr_kp.append((l.x, l.y))
             else:
-                for _ in range(32):
+                for _ in range(33):
                     curr_kp.append((-1, -1))
             
-            kp_arr.append(curr_kp)
+            # kp_arr.append(curr_kp)
             kp_write = [str(x) + "," + str(y) for x, y in curr_kp]
             out_file.write(f"{';'.join(kp_write)}\n")
             
