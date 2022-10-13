@@ -30,3 +30,6 @@ def keypoints_to_unit_vectors(kp_arr, pc_arr):
             (point2.y - point1.y) / dist
         ])
     return unit_vectors
+
+
+preprocess_dataset = lambda x: lambda y: keypoints_to_unit_vectors(global_coordinate_frame(x), y)

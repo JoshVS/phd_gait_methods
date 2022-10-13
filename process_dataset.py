@@ -17,9 +17,6 @@ def extract_keypoints(image):
             enable_segmentation = True,
             min_detection_confidence = 0.5
         )
-    for pc in mp_pose.POSE_CONNECTIONS:
-        print(pc)
-    quit()
     image_height, image_width,_ = image.shape
     with my_pose as pose:
         keypoints = pose.process(image)
