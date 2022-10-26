@@ -11,8 +11,8 @@ mp_pose = mp.solutions.pose
 
 
 def distance(point1, point2):
-    x1, y1 = point1[:][0], point1[:][1]
-    x2, y2 = point2[:][0], point2[:][1]
+    x1, y1 = np.array(point1[:][0]), np.array(point1[:][1])
+    x2, y2 = np.array(point2[:][0]), np.array(point2[:][1])
     return np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
 
 class VideoDataset:
@@ -61,16 +61,7 @@ class VideoDataset:
                     points = k.split(",")
                     p_arr = []
                     for p in points:
-                        p_arr.append(int(p))
+                        p_arr.append(int(float(p)))
                     k_arr.append(p_arr)
                 frames.append(k_arr)
             return frames
-
-my_dataset = VideoDataset()
-for i in range(33):
-    plt.figure()
-    plt.plot(my_dataset.distances[:][i][0], label="x")
-    plt.plot(my_dataset.distances[:][i][1], label="y")
-    plt.legend(loc="upper left")
-    plt.savefig(f"diagrams/kp_{i}.png")
-    plt.close()

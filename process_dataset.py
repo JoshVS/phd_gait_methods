@@ -5,10 +5,14 @@ import cv2
 
 from tqdm import tqdm
 
+from preprocessing import preprocess_dataset
+
 import mediapipe as mp
 mp_pose = mp.solutions.pose
 
 DATASET_DIR = "../../Datasets/MoviesGuns/"
+
+
 
 def extract_keypoints(image):
     my_pose = mp_pose.Pose(
@@ -46,14 +50,17 @@ def extract_from_video(filename, outfile_name, infofile_name):
                     info_file.write(f"height, {height}; width, {width}")
 
             kp = extract_keypoints(image)
+            
             if kp.pose_landmarks is not None:
-                for l in kp.pose_landmarks.landmark:
+                kp = preprocess_dataset(kp)
+                for l in kp:
                     curr_kp.append((l.x, l.y))
             else:
                 for _ in range(33):
                     curr_kp.append((-1, -1))
             
             # kp_arr.append(curr_kp)
+            
             kp_write = [str(x) + "," + str(y) for x, y in curr_kp]
             out_file.write(f"{';'.join(kp_write)}\n")
             
