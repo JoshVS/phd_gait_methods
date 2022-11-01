@@ -52,8 +52,8 @@ def extract_from_video(filename, outfile_name, infofile_name):
             kp = extract_keypoints(image)
             
             if kp.pose_landmarks is not None:
-                kp = preprocess_dataset(kp)
-                for l in kp:
+                # kp = preprocess_dataset(kp)
+                for l in kp.pose_landmarks.landmark:
                     curr_kp.append((l.x, l.y))
             else:
                 for _ in range(33):

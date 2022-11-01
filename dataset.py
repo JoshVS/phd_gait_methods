@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import mediapipe as mp
 mp_pose = mp.solutions.pose
 
+from .preprocessing import preprocess_dataset
 
 def distance(point1, point2):
     x1, y1 = np.array(point1[:][0]), np.array(point1[:][1])
@@ -32,6 +33,14 @@ class VideoDataset:
         return dist
 
 
+
+    def extract_features(self):
+        features = []
+        prev_skel = None
+        for skel in self.skeletons:
+            features.append(preprocess_dataset(skel, prev_skel))
+            prev_skel = skel
+        return prev_skel
 
 
     def _read_skeletons(self):
