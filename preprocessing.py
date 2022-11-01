@@ -43,7 +43,7 @@ def keypoints_to_unit_vectors(kp_arr):
         #     (point2[0] - point1[0]) / point_dist,
         #     (point2[1] - point1[1]) / point_dist
         # ))
-        unit_vectors.append(np.arccos(dx / point_dist))
+        unit_vectors.append(0 if point_dist == 0 else np.arccos(dx / point_dist))
     return unit_vectors
 
 

@@ -23,8 +23,8 @@ class VideoDataset:
         self.label_dir = label_dir
         self.info_dir = info_dir
         self.vid_skeletons = self._read_skeletons()
-        self.distances = self.get_distances()
-        self.video_features = self.extract_features()
+        # self.distances = self.get_distances()
+        self.vid_features = self.extract_features()
         C_min, C_max = min(self.vid_skeletons), max(self.vid_skeletons)
 
     def get_distances(self):
@@ -36,21 +36,27 @@ class VideoDataset:
 
 
     def extract_features(self):
-        video_features = []
-        for vid in self.vid_skeletons:
+        features = []
+        for i, vid in enumerate(self.vid_skeletons): 
             prev_skel = None
-            features = []
-            for skel in vid:
-                features.append(preprocess_dataset(skel, prev_skel))
+            frame_skels = []
+            loop = tqdm(vid)
+            for skel in loop:
+                frame_skels.append(preprocess_dataset(skel, prev_skel))
                 prev_skel = skel
-            video_features.append(features)
-        return video_features
+                loop.set_postfix(vid_number=i+1)
+            features.append(frame_skels)                
+        return features
 
 
     def _read_skeletons(self):
         skeletons = []
-        for filename, info_name in zip(os.listdir(self.label_dir), os.listdir(self.info_dir)):
+        loop = tqdm(zip(os.listdir(self.label_dir), os.listdir(self.info_dir)))
+        for filename, info_name in loop:
             skeletons.append(self._read_file(self.label_dir + filename, self.info_dir + info_name))
+            loop.set_postfix(filename=filename)
+        # print(len(skeletons[0][0]))
+        # quit()
         return skeletons
 
     
