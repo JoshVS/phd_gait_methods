@@ -7,26 +7,28 @@ pc = mp_pose.POSE_CONNECTIONS
 
 class Vector:
     def __init__(self, x, y):
-        self.x = x
-        self.y = y
+        self[0] = x
+        self[1] = y
 
     
 
 def global_coordinate_frame(kp_arr):
+    # print(kp_arr)
+    # quit()
     left_hip = kp_arr[mp_pose.PoseLandmark.LEFT_HIP]
     right_hip = kp_arr[mp_pose.PoseLandmark.RIGHT_HIP]
 
-    center_hip = ((left_hip.x + right_hip.x) / 2, (left_hip.x + right_hip.x) / 2)
+    center_hip = ((left_hip[0] + right_hip[0]) / 2, (left_hip[0] + right_hip[0]) / 2)
 
     for l in kp_arr:
-        l.x -= center_hip[0]
-        l.y -= center_hip[1]
+        l[0] -= center_hip[0]
+        l[1] -= center_hip[1]
     
     return kp_arr
 
 def dist(point1, point2):
-    term1 = (point1.x + point2.x) ** 2
-    term2 = (point1.y + point2.y) ** 2
+    term1 = (point1[0] + point2[0]) ** 2
+    term2 = (point1[1] + point2[1]) ** 2
     return np.sqrt(term1 + term2)
 
 def keypoints_to_unit_vectors(kp_arr):
@@ -35,11 +37,11 @@ def keypoints_to_unit_vectors(kp_arr):
         p1_ind, p2_ind = p
         point1 = kp_arr[p1_ind]
         point2 = kp_arr[p2_ind]
-        dx = point2.x - point1.x
+        dx = point2[0] - point1[0]
         point_dist = dist(point1, point2)
         # unit_vectors.append(Vector(
-        #     (point2.x - point1.x) / point_dist,
-        #     (point2.y - point1.y) / point_dist
+        #     (point2[0] - point1[0]) / point_dist,
+        #     (point2[1] - point1[1]) / point_dist
         # ))
         unit_vectors.append(np.arccos(dx / point_dist))
     return unit_vectors
@@ -102,7 +104,7 @@ def inter_frame_angles(kp_arr1, kp_arr2):
 
 def preprocess_dataset(x, y):
     glob_coords_x = global_coordinate_frame(x)
-    glob_coords_y = global_coordinate_frame(y)
+    glob_coords_y = y if y is None else global_coordinate_frame(y)
     return (
         keypoints_to_unit_vectors(glob_coords_x),
         body_part_feature_lengths(glob_coords_x),

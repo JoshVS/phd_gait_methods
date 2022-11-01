@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import mediapipe as mp
 mp_pose = mp.solutions.pose
 
-from .preprocessing import preprocess_dataset
+from preprocessing import preprocess_dataset
 
 def distance(point1, point2):
     x1, y1 = np.array(point1[:][0]), np.array(point1[:][1])
@@ -22,25 +22,29 @@ class VideoDataset:
         # skeletons = (video_id, frame_id, kp_id, 2)
         self.label_dir = label_dir
         self.info_dir = info_dir
-        self.skeletons = self._read_skeletons()
+        self.vid_skeletons = self._read_skeletons()
         self.distances = self.get_distances()
-        C_min, C_max = min(self.skeletons), max(self.skeletons)
+        self.video_features = self.extract_features()
+        C_min, C_max = min(self.vid_skeletons), max(self.vid_skeletons)
 
     def get_distances(self):
         dist = []
-        for i, point in enumerate(self.skeletons[0][1:]):
-            dist.append(distance(point, self.skeletons[0][i]))
+        for i, point in enumerate(self.vid_skeletons[0][1:]):
+            dist.append(distance(point, self.vid_skeletons[0][i]))
         return dist
 
 
 
     def extract_features(self):
-        features = []
-        prev_skel = None
-        for skel in self.skeletons:
-            features.append(preprocess_dataset(skel, prev_skel))
-            prev_skel = skel
-        return prev_skel
+        video_features = []
+        for vid in self.vid_skeletons:
+            prev_skel = None
+            features = []
+            for skel in vid:
+                features.append(preprocess_dataset(skel, prev_skel))
+                prev_skel = skel
+            video_features.append(features)
+        return video_features
 
 
     def _read_skeletons(self):
