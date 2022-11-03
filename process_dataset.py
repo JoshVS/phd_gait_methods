@@ -10,7 +10,7 @@ from preprocessing import preprocess_dataset
 import mediapipe as mp
 mp_pose = mp.solutions.pose
 
-DATASET_DIR = "../../Datasets/MoviesGuns/"
+DATASET_DIR = "../../Datasets/CASIA/DatasetB-1/video"
 
 
 
@@ -73,7 +73,7 @@ def extract_from_video(filename, outfile_name, infofile_name):
 
 def extract_from_directory(d_dir=DATASET_DIR):
     for filename in os.listdir(d_dir):
-        if filename.split(".")[-1] != "mp4":
+        if filename.split(".")[-1] != "mp4" and filename.split(".")[-1] != "avi":
             continue
         
         print(f"EXTRACTING {d_dir + filename}")

@@ -19,7 +19,7 @@ def show_gait_cycle(vid_seq):
         distances.append(dist(ankle1, ankle2))
     plt.figure()
     plt.plot(distances)
-    plt.show()
+    plt.savefig("output.png")
     plt.close()
 
 show_gait_cycle(skel_da.vid_skeletons[0])
