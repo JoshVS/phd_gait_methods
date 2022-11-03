@@ -2,7 +2,6 @@ import os
 
 import numpy as np
 import cv2
-from avi_r import AVIReader
 
 from tqdm import tqdm
 
