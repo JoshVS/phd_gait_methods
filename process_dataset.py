@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 import cv2
+from avi_r import AVIReader
 
 from tqdm import tqdm
 
@@ -10,7 +11,7 @@ from preprocessing import preprocess_dataset
 import mediapipe as mp
 mp_pose = mp.solutions.pose
 
-DATASET_DIR = "../../Datasets/CASIA/DatasetB-1/video"
+DATASET_DIR = "../../Datasets/CASIA/DatasetB-1/video/"
 
 
 
@@ -29,6 +30,7 @@ def extract_keypoints(image):
                 l.x *= image_width
                 l.y *= image_height
     return keypoints
+
 
 
 
@@ -77,10 +79,12 @@ def extract_from_directory(d_dir=DATASET_DIR):
             continue
         
         print(f"EXTRACTING {d_dir + filename}")
-        extract_from_video(
-            d_dir + filename, 
-            "labels/" + filename + ".txt",
-            "info/" + filename + ".info")
+        if filename.split(".")[-1] == "avi":
+            extract_from_video(
+                d_dir + filename, 
+                "labels/" + filename + ".txt",
+                "info/" + filename + ".info")
+        
 
 
 
