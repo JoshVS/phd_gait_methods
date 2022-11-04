@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import mediapipe as mp
 mp_pose = mp.solutions.pose
 
-from preprocessing import preprocess_dataset
+from preprocessing import preprocess_dataset, dist, global_coordinate_frame
 
 def distance(point1, point2):
     x1, y1 = np.array(point1[:][0]), np.array(point1[:][1])
@@ -18,14 +18,19 @@ def distance(point1, point2):
 
 class VideoDataset:
 
-    def __init__(self, label_dir="labels/", info_dir="info/"):
+    def __init__(self, label_dir="labels/", info_dir="info/", max_samples = None):
         # skeletons = (video_id, frame_id, kp_id, 2)
         self.label_dir = label_dir
         self.info_dir = info_dir
-        self.vid_skeletons = self._read_skeletons()
+        self.C_min = 1000000000
+        self.C_max = 0
+        self.vid_skeletons = self._read_skeletons(max_samples)
         # self.distances = self.get_distances()
         self.vid_features = self.extract_features()
-        C_min, C_max = min(self.vid_skeletons), max(self.vid_skeletons)
+        # C_min, C_max = np.min(np.array(self.vid_skeletons).flatten()), np.max(np.array(self.vid_skeletons).flatten())
+        self.norm_const = self.C_max - self.C_min
+
+        self.norm_skeletons = self.normalize_skeletons()
 
     def get_distances(self):
         dist = []
@@ -48,12 +53,46 @@ class VideoDataset:
             features.append(frame_skels)                
         return features
 
+    def normalize_skeletons(self):
+        norm_skel = []
+        for vid in self.vid_skeletons:
+            vid_skel = []
+            for frame in vid:
+                point1 = frame[np.argmax(frame[:][1])]
+                point2 = frame[np.argmin(frame[:][1])]
+                norm_dist = dist(point1, point2)
+                norm_kp = []
+                for kp in frame:
+                    x = 0 if norm_dist == 0 else kp[0] / norm_dist
+                    y = 0 if norm_dist == 0 else kp[1] / norm_dist
+                    norm_kp.append([x, y])
+                vid_skel.append(norm_kp)
+            norm_skel.append(vid_skel)
+        return norm_skel
 
-    def _read_skeletons(self):
+
+    # def normalize_skeletons(self):
+    #     norm_skel = []
+    #     for vid in self.vid_skeletons:
+    #         vid_skel = []
+    #         for frame in vid:
+    #             norm_kp = []
+    #             for kp in frame:
+    #                 x = (kp[0] - self.C_min) / self.norm_const * 10
+    #                 y = (kp[1] - self.C_min) / self.norm_const * 10
+    #                 norm_kp.append([x, y])
+    #             vid_skel.append(norm_kp)
+    #         norm_skel.append(vid_skel)
+    #     return norm_skel
+
+    def _read_skeletons(self, max_samples=None):
         skeletons = []
-        loop = tqdm(zip(os.listdir(self.label_dir), os.listdir(self.info_dir)))
+        loop = tqdm(zip(os.listdir(self.label_dir), os.listdir(self.info_dir))) if max_samples is None else tqdm(zip(os.listdir(self.label_dir)[:max_samples], os.listdir(self.info_dir)[:max_samples]))
+        i = 1
         for filename, info_name in loop:
-            skeletons.append(self._read_file(self.label_dir + filename, self.info_dir + info_name))
+            file_kp = self._read_file(self.label_dir + filename, self.info_dir + info_name)
+            if file_kp is not None:
+                skeletons.append(self._read_file(self.label_dir + filename, self.info_dir + info_name))
             loop.set_postfix(filename=filename)
         # print(len(skeletons[0][0]))
         # quit()
@@ -72,7 +111,10 @@ class VideoDataset:
                 info_dict[k] = v
 
         with open(filename, "r") as kp_file:
-            kp_arr = kp_file.read().strip().split("\n")
+            kp_txt = kp_file.read()
+            if kp_txt == '':
+                return None
+            kp_arr = kp_txt.strip().split("\n")
             for frame in kp_arr:
                 kps = frame.split(";")
                 k_arr = []
@@ -80,7 +122,10 @@ class VideoDataset:
                     points = k.split(",")
                     p_arr = []
                     for p in points:
-                        p_arr.append(int(float(p)))
+                        curr_val = int(float(p))
+                        self.C_min = min(curr_val, self.C_min)
+                        self.C_max = max(curr_val, self.C_max)
+                        p_arr.append(curr_val)
                     k_arr.append(p_arr)
-                frames.append(k_arr)
+                frames.append(global_coordinate_frame(k_arr))
             return frames

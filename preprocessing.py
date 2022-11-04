@@ -18,7 +18,7 @@ def global_coordinate_frame(kp_arr):
     left_hip = kp_arr[mp_pose.PoseLandmark.LEFT_HIP]
     right_hip = kp_arr[mp_pose.PoseLandmark.RIGHT_HIP]
 
-    center_hip = ((left_hip[0] + right_hip[0]) / 2, (left_hip[0] + right_hip[0]) / 2)
+    center_hip = ((left_hip[0] + right_hip[0]) / 2, (left_hip[1] + right_hip[1]) / 2)
 
     for l in kp_arr:
         l[0] -= center_hip[0]
@@ -27,8 +27,8 @@ def global_coordinate_frame(kp_arr):
     return kp_arr
 
 def dist(point1, point2):
-    term1 = (point1[0] + point2[0]) ** 2
-    term2 = (point1[1] + point2[1]) ** 2
+    term1 = (point1[0] - point2[0]) ** 2
+    term2 = (point1[1] - point2[1]) ** 2
     return np.sqrt(term1 + term2)
 
 def keypoints_to_unit_vectors(kp_arr):
@@ -103,8 +103,8 @@ def inter_frame_angles(kp_arr1, kp_arr2):
 
 
 def preprocess_dataset(x, y):
-    glob_coords_x = global_coordinate_frame(x)
-    glob_coords_y = y if y is None else global_coordinate_frame(y)
+    glob_coords_x = x#global_coordinate_frame(x)
+    glob_coords_y = y#y if y is None else global_coordinate_frame(y)
     return (
         keypoints_to_unit_vectors(glob_coords_x),
         body_part_feature_lengths(glob_coords_x),

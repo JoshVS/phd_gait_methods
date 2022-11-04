@@ -73,11 +73,12 @@ def extract_from_video(filename, outfile_name, infofile_name):
     cap.release()
 
 def extract_from_directory(d_dir=DATASET_DIR):
-    for filename in os.listdir(d_dir):
+    num_files = len(os.listdir(d_dir))
+    for i, filename in enumerate(os.listdir(d_dir)):
         if filename.split(".")[-1] != "mp4" and filename.split(".")[-1] != "avi":
             continue
         
-        print(f"EXTRACTING {d_dir + filename}")
+        print(f"EXTRACTING {d_dir + filename} [{i + 1} / {num_files}]")
         if filename.split(".")[-1] == "avi":
             extract_from_video(
                 d_dir + filename, 
