@@ -16,7 +16,6 @@ def filter_peaks(peaks, threshold=5):
     prev_peak = 0
     new_peaks = []
     for p in peaks:
-        print(p)
         if p - prev_peak > threshold:
             new_peaks.append(p)
         prev_peak = p
