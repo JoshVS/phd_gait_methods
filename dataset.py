@@ -3,6 +3,9 @@ import os
 import numpy as np
 import cv2
 
+
+from scipy.signal import savgol_filter, find_peaks
+
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -31,6 +34,7 @@ class VideoDataset:
         self.norm_const = self.C_max - self.C_min
 
         self.norm_skeletons = self.normalize_skeletons()
+        self.gait_cycles = self.get_gait_cycles()
 
     def get_distances(self):
         dist = []
@@ -129,3 +133,49 @@ class VideoDataset:
                     k_arr.append(p_arr)
                 frames.append(global_coordinate_frame(k_arr))
             return frames
+
+
+    def filter_peaks(peaks, threshold=5):
+        prev_peak = 0
+        new_peaks = []
+        for p in peaks:
+            if p - prev_peak > threshold:
+                new_peaks.append(p)
+            prev_peak = p
+        return new_peaks
+
+    def get_vid_peaks(self, norm_skel_vid):
+        distances = []
+        for i, kp in enumerate(norm_skel_vid):
+            ankle1 = kp[mp_pose.PoseLandmark.LEFT_ANKLE]
+            ankle2 = kp[mp_pose.PoseLandmark.RIGHT_ANKLE]
+            distances.append(dist(ankle1, ankle2))
+        filtered_distances = savgol_filter(distances, 9, 3)
+        peaks = find_peaks(filtered_distances)[0]
+        peaks = self.filter_peaks(peaks)
+        return peaks, [filtered_distances[x] for x in peaks], filtered_distances
+
+    def get_peaks(self):
+        vid_peaks = []
+        for v in self.norm_skeletons:
+            vid_peaks.append(self.get_vid_peaks(v))
+        return vid_peaks
+
+
+    def get_gait_cycles(self):
+        """
+        Gait cycles happen every second time ankle distances peak
+        """
+        peaks = self.get_peaks()
+        g_arr = []
+        for p in peaks:
+            g_arr.append(p[::2])
+        return g_arr
+
+    def show_gait_cycle(self, vid_seq):
+        peaks, peak_vals, distances = self.get_peaks(vid_seq)
+        plt.plot(distances)
+        plt.scatter(peaks, peak_vals)
+        plt.savefig("output.png")
+        plt.close()
+        quit()

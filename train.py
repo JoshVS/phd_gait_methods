@@ -32,6 +32,12 @@ def get_peaks(norm_skel_vid):
     peaks = filter_peaks(peaks)
     return peaks, [filtered_distances[x] for x in peaks], filtered_distances
 
+def get_gait_cycles(norm_skel_vid):
+    """
+    Gait cycles happen every second time ankle distances peak
+    """
+    peaks, _, _ = get_peaks(norm_skel_vid)
+    return peaks[::2]
 
 def show_gait_cycle(vid_seq):
     peaks, peak_vals, distances = get_peaks(vid_seq)
