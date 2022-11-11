@@ -28,13 +28,18 @@ class VideoDataset:
         self.C_min = 1000000000
         self.C_max = 0
         self.vid_skeletons = self._read_skeletons(max_samples)
+        self.norm_skeletons = self.normalize_skeletons()
+        s = self.norm_skeletons
+        # print(len(s[0][0]))
+        # quit()
         # self.distances = self.get_distances()
         self.vid_features = self.extract_features()
+        v = self.vid_features
         # C_min, C_max = np.min(np.array(self.vid_skeletons).flatten()), np.max(np.array(self.vid_skeletons).flatten())
         self.norm_const = self.C_max - self.C_min
 
-        self.norm_skeletons = self.normalize_skeletons()
         self.gait_cycles = self.get_gait_cycles()
+        self.gait_phases = self.get_gait_phases()
 
     def get_distances(self):
         dist = []
@@ -43,10 +48,46 @@ class VideoDataset:
         return dist
 
 
+    def get_gait_phases(self):
+        gait_phases = [
+            (0, 10),
+            (10, 30),
+            (30, 50),
+            (50, 60),
+            (60, 73),
+            (73, 87),
+            (87, 100)
+        ]
+        final_gait_features = []
+        for i, v in enumerate(self.gait_cycles):
+            # curr_feat = self.vid_features[i]
+            vid_g_f = []
+            prev_g = v[0]
+            for g in v[1:]:
+                len_gait = g - prev_g
+                curr_gp = []
+                for gp in gait_phases:
+                    start, stop = gp
+                    start = prev_g + int(start / 100 * len_gait)
+                    stop = prev_g + int(stop / 100 * len_gait)
+                    curr_f = []
+                    for f in range(5):
+                        curr_vid = self.vid_features[i]
+                        curr_frames = curr_vid[start:stop]
+                        tmp = None
+                        for fr in curr_frames:
+                            tmp = fr[f] if tmp is None else [x + y for x, y in zip(fr[f], tmp)]
+                        tmp = np.divide(tmp, stop - start)
+                        curr_f.append(tmp)
+                    curr_gp.append(curr_f)
+                vid_g_f.append(curr_gp)
+                prev_g = g
+            final_gait_features.append(vid_g_f)
+        return final_gait_features
 
     def extract_features(self):
         features = []
-        for i, vid in enumerate(self.vid_skeletons): 
+        for i, vid in enumerate(self.norm_skeletons): 
             prev_skel = None
             frame_skels = []
             loop = tqdm(vid)
@@ -135,7 +176,7 @@ class VideoDataset:
             return frames
 
 
-    def filter_peaks(peaks, threshold=5):
+    def filter_peaks(self, peaks, threshold=5):
         prev_peak = 0
         new_peaks = []
         for p in peaks:
@@ -158,7 +199,8 @@ class VideoDataset:
     def get_peaks(self):
         vid_peaks = []
         for v in self.norm_skeletons:
-            vid_peaks.append(self.get_vid_peaks(v))
+            p, _, _ = self.get_vid_peaks(v)
+            vid_peaks.append(p)
         return vid_peaks
 
 

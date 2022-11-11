@@ -43,7 +43,7 @@ def keypoints_to_unit_vectors(kp_arr):
         #     (point2[0] - point1[0]) / point_dist,
         #     (point2[1] - point1[1]) / point_dist
         # ))
-        unit_vectors.append(0 if point_dist == 0 else np.arccos(dx / point_dist))
+        unit_vectors.append(0 if point_dist == 0 else   np.arccos(dx / point_dist))
     return unit_vectors
 
 
@@ -105,10 +105,10 @@ def inter_frame_angles(kp_arr1, kp_arr2):
 def preprocess_dataset(x, y):
     glob_coords_x = x#global_coordinate_frame(x)
     glob_coords_y = y#y if y is None else global_coordinate_frame(y)
-    return (
+    return [
         keypoints_to_unit_vectors(glob_coords_x),
         body_part_feature_lengths(glob_coords_x),
         join_distance_features(glob_coords_x),
         inter_frame_distances(glob_coords_x, glob_coords_y),
         inter_frame_angles(glob_coords_x, glob_coords_y)
-    )
+    ]
