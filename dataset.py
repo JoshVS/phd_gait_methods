@@ -27,7 +27,7 @@ class VideoDataset:
         self.info_dir = info_dir
         self.C_min = 1000000000
         self.C_max = 0
-        self.vid_skeletons = self._read_skeletons(max_samples)
+        self.vid_skeletons, self.labels = self._read_skeletons(max_samples)
         self.norm_skeletons = self.normalize_skeletons()
         s = self.norm_skeletons
         # print(len(s[0][0]))
@@ -59,9 +59,14 @@ class VideoDataset:
             (87, 100)
         ]
         final_gait_features = []
+        print(self.gait_cycles)
+        # quit()
         for i, v in enumerate(self.gait_cycles):
             # curr_feat = self.vid_features[i]
             vid_g_f = []
+            if len(v) == 0:
+                self.labels.pop(i)
+                continue
             prev_g = v[0]
             for g in v[1:]:
                 len_gait = g - prev_g
@@ -115,33 +120,19 @@ class VideoDataset:
             norm_skel.append(vid_skel)
         return norm_skel
 
-
-    # def normalize_skeletons(self):
-    #     norm_skel = []
-    #     for vid in self.vid_skeletons:
-    #         vid_skel = []
-    #         for frame in vid:
-    #             norm_kp = []
-    #             for kp in frame:
-    #                 x = (kp[0] - self.C_min) / self.norm_const * 10
-    #                 y = (kp[1] - self.C_min) / self.norm_const * 10
-    #                 norm_kp.append([x, y])
-    #             vid_skel.append(norm_kp)
-    #         norm_skel.append(vid_skel)
-    #     return norm_skel
-
     def _read_skeletons(self, max_samples=None):
         skeletons = []
         loop = tqdm(zip(os.listdir(self.label_dir), os.listdir(self.info_dir))) if max_samples is None else tqdm(zip(os.listdir(self.label_dir)[:max_samples], os.listdir(self.info_dir)[:max_samples]))
         i = 1
+        labels = []
         for filename, info_name in loop:
+
             file_kp = self._read_file(self.label_dir + filename, self.info_dir + info_name)
             if file_kp is not None:
-                skeletons.append(self._read_file(self.label_dir + filename, self.info_dir + info_name))
+                labels.append(filename.split("-")[0])
+                skeletons.append(file_kp)
             loop.set_postfix(filename=filename)
-        # print(len(skeletons[0][0]))
-        # quit()
-        return skeletons
+        return skeletons, labels
 
     
     def _read_file(self, filename, info_name):
@@ -196,10 +187,16 @@ class VideoDataset:
         peaks = self.filter_peaks(peaks)
         return peaks, [filtered_distances[x] for x in peaks], filtered_distances
 
-    def get_peaks(self):
+    def get_peaks(self, show_peaks=None):
         vid_peaks = []
-        for v in self.norm_skeletons:
-            p, _, _ = self.get_vid_peaks(v)
+        for i, v in enumerate(self.norm_skeletons):
+            p, f, d = self.get_vid_peaks(v)
+            if i == show_peaks:
+                plt.figure()
+                plt.plot(d)
+                plt.scatter(p, f)
+                plt.savefig("peaks.png")
+                plt.close()
             vid_peaks.append(p)
         return vid_peaks
 
