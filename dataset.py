@@ -14,6 +14,11 @@ mp_pose = mp.solutions.pose
 
 from preprocessing import preprocess_dataset, dist, global_coordinate_frame
 
+def dim(l):
+    if not type(l) == list:
+        return []
+    return [len(l)] + dim(l[0])
+
 def distance(point1, point2):
     x1, y1 = np.array(point1[:][0]), np.array(point1[:][1])
     x2, y2 = np.array(point2[:][0]), np.array(point2[:][1])
@@ -40,6 +45,13 @@ class VideoDataset:
 
         self.gait_cycles = self.get_gait_cycles()
         self.gait_phases = self.get_gait_phases()
+        self.compress_gait_phases()
+
+    def compress_gait_phases(self):
+        ret_val = []
+        for sample in self.gait_phases:
+            ret_val.extend(sample)
+        self.gait_phases = ret_val
 
     def get_distances(self):
         dist = []
@@ -59,10 +71,7 @@ class VideoDataset:
             (87, 100)
         ]
         final_gait_features = []
-        print(self.gait_cycles)
-        # quit()
         for i, v in enumerate(self.gait_cycles):
-            # curr_feat = self.vid_features[i]
             vid_g_f = []
             if len(v) == 0:
                 self.labels.pop(i)
@@ -83,7 +92,8 @@ class VideoDataset:
                         for fr in curr_frames:
                             tmp = fr[f] if tmp is None else [x + y for x, y in zip(fr[f], tmp)]
                         tmp = np.divide(tmp, stop - start)
-                        curr_f.append(tmp)
+                        curr_f.extend(tmp)
+                    
                     curr_gp.append(curr_f)
                 vid_g_f.append(curr_gp)
                 prev_g = g
