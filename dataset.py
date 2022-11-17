@@ -49,8 +49,11 @@ class VideoDataset:
 
     def compress_gait_phases(self):
         ret_val = []
-        for sample in self.gait_phases:
+        label_ret = []
+        for sample, label in zip(self.gait_phases, self.labels):
             ret_val.extend(sample)
+            label_ret.extend([label] * len(sample))
+        self.labels = label_ret
         self.gait_phases = ret_val
 
     def get_distances(self):
