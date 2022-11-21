@@ -33,6 +33,7 @@ class VideoDataset:
         self.C_min = 1000000000
         self.C_max = 0
         self.vid_skeletons, self.labels = self._read_skeletons(max_samples)
+        self.n_classes = len(np.unique(self.labels))
         self.norm_skeletons = self.normalize_skeletons()
         s = self.norm_skeletons
         # print(len(s[0][0]))
@@ -46,6 +47,16 @@ class VideoDataset:
         self.gait_cycles = self.get_gait_cycles()
         self.gait_phases = self.get_gait_phases()
         self.compress_gait_phases()
+
+    def one_hot_labels(self):
+        un_labels = list(np.unique(self.labels))
+        self.n_classes = len(un_labels)
+        onehot = np.zeros((len(self.labels), len(un_labels)))
+        for i, l in enumerate(self.labels):
+            l_ind = un_labels.index(l)
+            onehot[i, l_ind] = 1
+        return onehot
+
 
     def compress_gait_phases(self):
         ret_val = []
