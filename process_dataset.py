@@ -32,42 +32,47 @@ def extract_keypoints(image):
 
 
 
-
 def extract_from_video(filename, outfile_name, infofile_name):
+    # Open up video file, get number of frames
     cap = cv2.VideoCapture(filename)
     length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     loop = tqdm(range(length))
+    
+    kp_arr = [] # This is an inline comment
 
-    kp_arr = []
+    # Output processed data to file
     with open(outfile_name, "w")  as out_file :
         dimensions = None
         for i in loop:
+
+            # Create KP array for current frame
             curr_kp = []
+
+            # Read in frame, convert to RGB colouring
             _, frame = cap.read()
             image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Write metadata to info file
             if i == 0:
                 with open(infofile_name, "w") as info_file:
                     height, width, _ = image.shape
                     info_file.write(f"height, {height}; width, {width}")
 
+            # Extract keypoints
             kp = extract_keypoints(image)
             
+            # Add keypoints to array
             if kp.pose_landmarks is not None:
-                # kp = preprocess_dataset(kp)
                 for l in kp.pose_landmarks.landmark:
                     curr_kp.append((l.x, l.y))
             else:
                 for _ in range(33):
                     curr_kp.append((-1, -1))
-            
-            # kp_arr.append(curr_kp)
-            
+                         
+            # Format keypoints, write to output file
             kp_write = [str(x) + "," + str(y) for x, y in curr_kp]
             out_file.write(f"{';'.join(kp_write)}\n")
             
-            # cv2.imshow('frame',image)
-            # if cv2.waitKey(1) & 0xFF == ord('q'):
-            #     break
             loop.set_postfix()
 
     cap.release()
