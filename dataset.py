@@ -241,4 +241,23 @@ class VideoDataset:
         plt.scatter(peaks, peak_vals)
         plt.savefig("output.png")
         plt.close()
-        quit()
+
+class KinectDataset:
+    def __init__(self, directory="KinectDataset/"):
+        self.directory = directory
+        self.filedata = self._get_file_data() # (n_people, n_files, n_lines, 2)
+
+    def _get_file_data(self):
+        ret_val = []
+        for filename in os.listdir(self.directory):
+            curr_person = []
+            for f in os.listdir(self.directory + filename):
+                with open(self.directory + filename + f) as infile:
+                    file_contents = infile.read().split('\n')
+                    for x in file_contents:
+                        curr_file.append([float(a) for a in x.split(';')[:2]])
+                curr_person.append(curr_file)
+            ret_val.append(curr_person)
+        return ret_val # (n_people, n_files, n_lines, 2)
+
+
