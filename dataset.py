@@ -243,21 +243,84 @@ class VideoDataset:
         plt.close()
 
 class KinectDataset:
-    def __init__(self, directory="KinectDataset/"):
+    def __init__(self, directory="KinectDataset/", max_samples=None):
         self.directory = directory
-        self.filedata = self._get_file_data() # (n_people, n_files, n_lines, 2)
+        self.skel_data = self._get_file_data(max_samples) # (n_people, n_files, n_lines, 3)
+        self.connections = [
+            ('Head', 'Shoulder-Center'),
+            ('Shoulder-Center', 'Shoulder-Right'),
+            ('Shoulder-Center', 'Shoulder-Left'),
+            ('Shoulder-Center', 'Spine'),
+            ('Spine', 'Hip-centro'),
+            ('Hip-centro', 'Hip-Left'),            
+            ('Hip-centro', 'Hip-Right'),            
+            ('Hip-Right', 'Knee-Right'),            
+            ('Hip-Left', 'Knee-Left'),            
+            ('Knee-Right', "Ankle-Right"),                    
+            ("Ankle-Right", 'Foot-Right'),        
+            ('Knee-Left', "Ankle-Left"),                    
+            ("Ankle-Left", 'Foot-Left'),
+            ("Shoulder-Left", "Elbow-Left"),
+            ("Elbow-Left", "Wrist-Left"),
+            ("Wrist-Left", "Hand-Left"),
+            ("Shoulder-Right", "Elbow-Right"),
+            ("Elbow-Right", "Wrist-Right"),
+            ("Wrist-Right", "Hand-Right"),
+            
+        ]
+        
 
-    def _get_file_data(self):
+
+    def _get_file_data(self, max_samples):
         ret_val = []
-        for filename in os.listdir(self.directory):
+        if max_samples is None:
+            loop = tqdm(os.listdir(self.directory))
+        else:
+            max_ind = int(len(os.listdir(self.directory)) * max_samples)
+            loop = tqdm(os.listdir(self.directory)[:max_ind])
+        for filename in loop:
             curr_person = []
             for f in os.listdir(self.directory + filename):
-                with open(self.directory + filename + f) as infile:
+                curr_file = []
+                with open(self.directory + filename + "/" +  f) as infile:
                     file_contents = infile.read().split('\n')
                     for x in file_contents:
-                        curr_file.append([float(a) for a in x.split(';')[:2]])
+                        if x == '':
+                            continue
+                        z = float(x.split(';')[-1])
+                        scale = 200 / (200 + z)
+                        curr_file.append([x.split(';')[0]] + [scale * float(a) for a in x.split(';')[1:3]])
                 curr_person.append(curr_file)
             ret_val.append(curr_person)
-        return ret_val # (n_people, n_files, n_lines, 2)
+            loop.set_postfix()
+        return ret_val # (n_people, n_files, n_lines, 3)
 
+
+    def show_person(self, p=0, f=0):
+        
+        person = self.skel_data[p][f] # (n_lines, 3)
+        assert person[0][0] == 'Head'
+        person_skeleton = [person[0][:]]
+        kp_dict = {"Head": person[0][1:]}
+        for l in person[1:]: # l = (3,)
+            if l[0] == 'Head':
+                break
+            person_skeleton.append(l[:])
+            kp_dict[l[0]] = l[1:]
+
+
+        plt.figure()
+        plt.scatter([p[1] for p in person_skeleton], [p[2] for p in person_skeleton])
+        for p in person_skeleton:
+            plt.text(p[1], p[2], p[0])
+        for from_val, to_val in self.connections:
+            plt.plot(
+                [kp_dict[from_val][0], kp_dict[to_val][0]],
+                [kp_dict[from_val][1], kp_dict[to_val][1]])
+
+        
+        
+
+        plt.savefig('output.png')
+        plt.close()
 
