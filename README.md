@@ -12,7 +12,7 @@ A set of methods for gait analysis. Based on the paper atteched to repository.
 # Running the Model
 
 For the CASIA dataset, you can simply copy-paste this into a script:
-```
+```python
 import matplotlib.pyplot as plt
 
 from scipy.signal import savgol_filter, find_peaks
