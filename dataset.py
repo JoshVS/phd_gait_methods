@@ -250,9 +250,6 @@ class KinectDataset:
     def __init__(self, directory="KinectDataset/", max_samples=None):
         self.directory = directory
         self.skel_data, self.kp_indices = self._get_file_data(max_samples) # (n_people, n_files, n_lines, 3)
-        print(self.kp_indices)
-        print(dim(self.skel_data))
-        # quit()
         
         self.connections = [
             ('Head', 'Shoulder-Center'),
@@ -277,7 +274,6 @@ class KinectDataset:
         ]
         self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
         self.vid_skeletons, self.labels = self.reshape_skeletons()
-        print(dim(self.vid_skeletons))
         # quit()
         self.norm_skeletons = self.normalize_skeletons()
         
@@ -286,7 +282,12 @@ class KinectDataset:
         self.gait_cycles = self.get_gait_cycles()
         self.gait_phases = self.get_gait_phases()
         self.compress_gait_phases()
-        
+        self.n_classes = len(np.unique(self.labels))
+        self.shape = dim(self.gait_phases)
+
+        # print(f"Gait Phases: {dim(self.gait_phases)}")
+        # print(f"Labels: {len(self.labels)}")
+        # quit()
 
 
     def _get_file_data(self, max_samples):
@@ -332,9 +333,9 @@ class KinectDataset:
                     if l[0] == "Head":
                         reshaped_skel[-1].append([])
                     reshaped_skel[-1][-1].append([l[1], l[2]])
-                if len(reshaped_skel[-1][-1]) != 19:
+                if len(reshaped_skel[-1][-1]) != 20:
                     print(len(reshaped_skel[-1][-1]))
-                    # quit()
+                    quit()
         return reshaped_skel, labels
 
 
@@ -446,6 +447,7 @@ class KinectDataset:
 
     def extract_features(self):
         features = []
+        total_skels = len(self.norm_skeletons)
         for i, vid in enumerate(self.norm_skeletons): 
             prev_skel = None
             frame_skels = []
@@ -453,11 +455,11 @@ class KinectDataset:
             for skel in loop:
                 frame_skels.append(preprocess_kinect_dataset(skel, prev_skel, self.kp_indices, self.pc))
                 prev_skel = skel
-                loop.set_postfix(vid_number=i+1)
-            features.append(frame_skels)                
+                loop.set_postfix(vid_number=f"{i+1}/{total_skels}")
+            features.append(frame_skels)
         return features
     
-    
+
     def get_gait_phases(self):
         gait_phases = [
             (0, 10),
@@ -497,3 +499,17 @@ class KinectDataset:
                 prev_g = g
             final_gait_features.append(vid_g_f)
         return final_gait_features
+
+    def show_gait_cycle(self, vid_seq=None):
+        if vid_seq is None:
+            vid_seq = self.vid_skeletons[0]
+        self.get_peaks(1)
+
+    def one_hot_labels(self):
+        un_labels = list(np.unique(self.labels))
+        self.n_classes = len(un_labels)
+        onehot = np.zeros((len(self.labels), len(un_labels)))
+        for i, l in enumerate(self.labels):
+            l_ind = un_labels.index(l)
+            onehot[i, l_ind] = 1
+        return onehot

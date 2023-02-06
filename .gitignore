@@ -6,6 +6,7 @@ __pycache__/
 *.out
 
 KinectDataset/
+logs/
 
 # C extensions
 *.so
