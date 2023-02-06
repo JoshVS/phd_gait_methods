@@ -13,11 +13,15 @@ import mediapipe as mp
 mp_pose = mp.solutions.pose
 
 from preprocessing import preprocess_dataset, dist, global_coordinate_frame
+from kinect_preprocessing import preprocess_kinect_dataset, global_coordinate_frame_kinect
 
-def dim(l):
+def _dim(l):
     if not type(l) == list:
         return []
-    return [len(l)] + dim(l[0])
+    return [len(l)] + _dim(l[0])
+
+def dim(l):
+    return tuple(_dim(l))
 
 def distance(point1, point2):
     x1, y1 = np.array(point1[:][0]), np.array(point1[:][1])
@@ -245,7 +249,11 @@ class VideoDataset:
 class KinectDataset:
     def __init__(self, directory="KinectDataset/", max_samples=None):
         self.directory = directory
-        self.skel_data = self._get_file_data(max_samples) # (n_people, n_files, n_lines, 3)
+        self.skel_data, self.kp_indices = self._get_file_data(max_samples) # (n_people, n_files, n_lines, 3)
+        print(self.kp_indices)
+        print(dim(self.skel_data))
+        # quit()
+        
         self.connections = [
             ('Head', 'Shoulder-Center'),
             ('Shoulder-Center', 'Shoulder-Right'),
@@ -266,12 +274,23 @@ class KinectDataset:
             ("Shoulder-Right", "Elbow-Right"),
             ("Elbow-Right", "Wrist-Right"),
             ("Wrist-Right", "Hand-Right"),
-            
         ]
+        self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
+        self.vid_skeletons, self.labels = self.reshape_skeletons()
+        print(dim(self.vid_skeletons))
+        # quit()
+        self.norm_skeletons = self.normalize_skeletons()
+        
+        self.vid_features = self.extract_features()
+
+        self.gait_cycles = self.get_gait_cycles()
+        self.gait_phases = self.get_gait_phases()
+        self.compress_gait_phases()
         
 
 
     def _get_file_data(self, max_samples):
+        kp_indices = {}
         ret_val = []
         if max_samples is None:
             loop = tqdm(os.listdir(self.directory))
@@ -284,17 +303,58 @@ class KinectDataset:
                 curr_file = []
                 with open(self.directory + filename + "/" +  f) as infile:
                     file_contents = infile.read().split('\n')
-                    for x in file_contents:
+                    for i, x in enumerate(file_contents):
                         if x == '':
                             continue
                         z = float(x.split(';')[-1])
                         scale = 200 / (200 + z)
+                        if x.split(';')[0] not in kp_indices.keys():
+                            kp_indices[x.split(';')[0]] = i % 20
+                        elif kp_indices[x.split(';')[0]] != i % 20:
+                            print(f"Whoops {i} != {kp_indices[x.split(';')[0]]}")
+                            quit()
                         curr_file.append([x.split(';')[0]] + [scale * float(a) for a in x.split(';')[1:3]])
                 curr_person.append(curr_file)
             ret_val.append(curr_person)
             loop.set_postfix()
-        return ret_val # (n_people, n_files, n_lines, 3)
+        return ret_val, kp_indices # (n_people, n_files, n_lines, 3)
 
+    def reshape_skeletons(self):
+        # Need skeleton to be shape (vid_seq, frame, keypoints, 2)
+        labels = []
+        reshaped_skel = []
+        for i, person in enumerate(self.skel_data):
+            # reshaped_skel.append([])
+            for f in person:
+                reshaped_skel.append([])
+                labels.append(i)
+                for l in f:
+                    if l[0] == "Head":
+                        reshaped_skel[-1].append([])
+                    reshaped_skel[-1][-1].append([l[1], l[2]])
+                if len(reshaped_skel[-1][-1]) != 19:
+                    print(len(reshaped_skel[-1][-1]))
+                    # quit()
+        return reshaped_skel, labels
+
+
+
+    def normalize_skeletons(self):
+        norm_skel = []
+        for vid in self.vid_skeletons:
+            vid_skel = []
+            for frame in vid:
+                point1 = frame[np.argmax(frame[:][1])]
+                point2 = frame[np.argmin(frame[:][1])]
+                norm_dist = dist(point1, point2)
+                norm_kp = []
+                for kp in frame:
+                    x = 0 if norm_dist == 0 else kp[0] / norm_dist
+                    y = 0 if norm_dist == 0 else kp[1] / norm_dist
+                    norm_kp.append([x, y])
+                vid_skel.append(norm_kp)
+            norm_skel.append(vid_skel)
+        return norm_skel
 
     def show_person(self, p=0, f=0):
         
@@ -324,3 +384,116 @@ class KinectDataset:
         plt.savefig('output.png')
         plt.close()
 
+    def filter_peaks(self, peaks, threshold=5):
+        prev_peak = 0
+        new_peaks = []
+        for p in peaks:
+            if p - prev_peak > threshold:
+                new_peaks.append(p)
+            prev_peak = p
+        return new_peaks
+
+    def get_vid_peaks(self, norm_skel_vid):
+        distances = []
+        for i, kp in enumerate(norm_skel_vid):
+            ankle1 = kp[self.kp_indices["Ankle-Left"]]
+            ankle2 = kp[self.kp_indices["Ankle-Right"]]
+            distances.append(dist(ankle1, ankle2))
+        filtered_distances = savgol_filter(distances, 9, 3)
+        peaks = find_peaks(filtered_distances)[0]
+        peaks = self.filter_peaks(peaks)
+        return peaks, [filtered_distances[x] for x in peaks], filtered_distances
+
+    def get_peaks(self, show_peaks=None):
+        vid_peaks = []
+        for i, v in enumerate(self.norm_skeletons):
+            p, f, d = self.get_vid_peaks(v)
+            if i == show_peaks:
+                plt.figure()
+                plt.plot(d)
+                plt.scatter(p, f)
+                plt.savefig("peaks.png")
+                plt.close()
+            vid_peaks.append(p)
+        return vid_peaks
+
+    def get_gait_cycles(self):
+        """
+        Gait cycles happen every second time ankle distances peak
+        """
+        peaks = self.get_peaks()
+        g_arr = []
+        for p in peaks:
+            g_arr.append(p[::2])
+        return g_arr
+
+    def show_gait_cycle(self, vid_seq):
+        peaks, peak_vals, distances = self.get_peaks(vid_seq)
+        plt.plot(distances)
+        plt.scatter(peaks, peak_vals)
+        plt.savefig("output.png")
+        plt.close()
+
+    def compress_gait_phases(self):
+        ret_val = []
+        label_ret = []
+        for sample, label in zip(self.gait_phases, self.labels):
+            ret_val.extend(sample)
+            label_ret.extend([label] * len(sample))
+        self.labels = label_ret
+        self.gait_phases = ret_val
+
+
+    def extract_features(self):
+        features = []
+        for i, vid in enumerate(self.norm_skeletons): 
+            prev_skel = None
+            frame_skels = []
+            loop = tqdm(vid)
+            for skel in loop:
+                frame_skels.append(preprocess_kinect_dataset(skel, prev_skel, self.kp_indices, self.pc))
+                prev_skel = skel
+                loop.set_postfix(vid_number=i+1)
+            features.append(frame_skels)                
+        return features
+    
+    
+    def get_gait_phases(self):
+        gait_phases = [
+            (0, 10),
+            (10, 30),
+            (30, 50),
+            (50, 60),
+            (60, 73),
+            (73, 87),
+            (87, 100)
+        ]
+        final_gait_features = []
+        for i, v in enumerate(self.gait_cycles):
+            vid_g_f = []
+            if len(v) == 0:
+                self.labels.pop(i)
+                continue
+            prev_g = v[0]
+            for g in v[1:]:
+                len_gait = g - prev_g
+                curr_gp = []
+                for gp in gait_phases:
+                    start, stop = gp
+                    start = prev_g + int(start / 100 * len_gait)
+                    stop = prev_g + int(stop / 100 * len_gait)
+                    curr_f = []
+                    for f in range(5):
+                        curr_vid = self.vid_features[i]
+                        curr_frames = curr_vid[start:stop]
+                        tmp = None
+                        for fr in curr_frames:
+                            tmp = fr[f] if tmp is None else [x + y for x, y in zip(fr[f], tmp)]
+                        tmp = np.divide(tmp, stop - start)
+                        curr_f.extend(tmp)
+                    
+                    curr_gp.append(curr_f)
+                vid_g_f.append(curr_gp)
+                prev_g = g
+            final_gait_features.append(vid_g_f)
+        return final_gait_features
