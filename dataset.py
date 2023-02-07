@@ -24,8 +24,8 @@ def dim(l):
     return tuple(_dim(l))
 
 def distance(point1, point2):
-    x1, y1 = np.array(point1[:][0]), np.array(point1[:][1])
-    x2, y2 = np.array(point2[:][0]), np.array(point2[:][1])
+    x1, y1 = np.array([p[0] for p in point1]), np.array([p[1] for p in point1])
+    x2, y2 = np.array([p[0] for p in point2]), np.array([p[1] for p in point2])
     return np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
 
 class VideoDataset:
@@ -136,8 +136,8 @@ class VideoDataset:
         for vid in self.vid_skeletons:
             vid_skel = []
             for frame in vid:
-                point1 = frame[np.argmax(frame[:][1])]
-                point2 = frame[np.argmin(frame[:][1])]
+                point1 = frame[np.argmax([f[1] for f in frame])]
+                point2 = frame[np.argmin([f[1] for f in frame])]
                 norm_dist = dist(point1, point2)
                 norm_kp = []
                 for kp in frame:
@@ -345,8 +345,8 @@ class KinectDataset:
         for vid in self.vid_skeletons:
             vid_skel = []
             for frame in vid:
-                point1 = frame[np.argmax(frame[:][1])]
-                point2 = frame[np.argmin(frame[:][1])]
+                point1 = frame[np.argmax([f[1] for f in frame])]
+                point2 = frame[np.argmin([f[1] for f in frame])]
                 norm_dist = dist(point1, point2)
                 norm_kp = []
                 for kp in frame:
