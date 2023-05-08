@@ -1,5 +1,42 @@
 from dataset import NaiveVideoDataset
+from naive_classifier import create_classifier
+import wandb
+from tensorflow.keras.callbacks import Callback, EarlyStopping, ReduceLROnPlateau
 
 
-skel_data = NaiveVideoDataset(max_samples=8)
-print(skel_data.shape())
+
+
+
+skel_data = NaiveVideoDataset(max_samples=None)
+
+epochs=10000
+lr=0.00001
+loss='categorical_crossentropy'
+my_classifier = create_classifier(skel_data, lr, loss)
+
+run = wandb.init(
+    project="naive_classifier",
+    config={
+        "learning_rate": lr,
+        "epochs": epochs,
+    })
+
+class MyCallback(Callback):
+
+    def on_epoch_end(self, epoch, logs=None):
+        run.log(logs)
+
+
+
+TRAINING_CALLBACKS = [
+    MyCallback(),
+    ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=50, min_lr=0.0000001),
+    EarlyStopping(min_delta=0.001, patience=200, monitor='loss')
+]
+
+# simulating a training run
+my_classifier.fit(skel_data.X, 
+                  skel_data.y, 
+                  epochs=epochs, 
+                  callbacks=[TRAINING_CALLBACKS],
+                  validation_split=0.3)

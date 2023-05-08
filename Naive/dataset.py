@@ -3,6 +3,8 @@ import os
 import numpy as np
 import cv2
 
+from sklearn.utils import shuffle
+from scipy.interpolate import interp1d
 
 from scipy.signal import savgol_filter, find_peaks
 
@@ -33,16 +35,52 @@ def distance(point1, point2):
     return np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
 
 class NaiveVideoDataset:
+    """
+    X: Shape (n_samples, n_timesteps, n_features)
+    """
 
     def __init__(self, label_dir="../labels/", info_dir="../info/", max_samples = None):
         # skeletons = (video_id, frame_id, kp_id, 2)
         self.label_dir = label_dir
         self.info_dir = info_dir
         self.vid_skeletons, self.labels = self._read_skeletons(max_samples)
-        self.n_classes = len(np.unique(self.labels))
+        self.vid_skeletons = np.array(self.vid_skeletons, dtype=np.float32)
+        self.labels = self.one_hot_labels()
+        self.n_classes = self.labels.shape[-1]
+        self.X, self.y = shuffle(self.vid_skeletons, self.labels)
+        self.normalize_skeletons()
+        self.global_coords()
+        self.accumulated_frame_difference_energy_image()
+
+    def accumulated_frame_difference_energy_image(self):
+        for i in range(self.X.shape[0]):
+            for j in range(1, self.X.shape[1]):
+                for k in range(self.X.shape[2]):
+                    forward_frame_difference = 0 if self.X[i,j,k] <= self.X[i,j - 1,k] else self.X[i,j,k] - self.X[i,j - 1,k]
+                    backward_frame_difference = 0 if self.X[i,j,k] >= self.X[i,j - 1,k] else self.X[i,j - 1,k] - self.X[i,j,k]
+                    self.X[i,j,k] = forward_frame_difference + backward_frame_difference
+
+
+    def global_coords(self):
+        for i in range(self.X.shape[0]):
+            for j in range(self.X.shape[1]):
+                self.X[i,j,::2] -= self.X[i,j,0]
+                self.X[i,j,1::2] -= self.X[i,j,1]
+        
+
+    def normalize_skeletons(self):
+        for i in range(self.X.shape[0]):
+            for j in range(self.X.shape[1]):
+                max_val = np.max(self.X[i,j,...])
+                min_val = np.min(self.X[i,j,...])
+                val_range = (max_val - min_val)
+                self.X[i,j,...] = (max_val - self.X[i,j,...]) / val_range if val_range != 0  else max_val
 
     def shape(self):
         return dim(self.vid_skeletons)
+    
+    def yshape(self):
+        return dim(self.labels)
 
     def one_hot_labels(self):
         un_labels = list(np.unique(self.labels))
@@ -129,8 +167,26 @@ class NaiveVideoDataset:
                 skeletons.append(file_kp)
             loop.set_postfix(filename=filename)
 
+
         for i in range(len(skeletons)):
-            skeletons[i] = skeletons[i][:min_frames]
+            for j in range(len(skeletons[i])):
+                new_arr = []
+                for k in range(len(skeletons[i][j])):
+                    new_arr.append(skeletons[i][j][k][0])
+                    new_arr.append(skeletons[i][j][k][1])
+                skeletons[i][j] = new_arr
+        
+
+        # Interpolate Frames
+        for i in range(len(skeletons)):
+            curr_vid = skeletons[i]
+            x = np.arange(0, len(curr_vid))
+            f = interp1d(x, curr_vid, axis=0)
+            xnew = np.linspace(0, len(curr_vid) - 1, min_frames)
+            ynew = f(xnew)
+            skeletons[i] = ynew
+
+        
         return skeletons, labels
 
     
