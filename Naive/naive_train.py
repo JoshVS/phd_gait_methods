@@ -2,12 +2,14 @@ from dataset import NaiveVideoDataset
 from naive_classifier import create_classifier
 import wandb
 from tensorflow.keras.callbacks import Callback, EarlyStopping, ReduceLROnPlateau
+import matplotlib.pyplot as plt
 
 
-
+from scipy.signal import savgol_filter, find_peaks
 
 
 skel_data = NaiveVideoDataset(max_samples=None)
+d = skel_data.distances
 
 epochs=10000
 lr=0.00001

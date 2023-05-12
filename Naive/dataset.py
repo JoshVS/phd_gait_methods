@@ -29,9 +29,21 @@ def _dim(l, check_for_error):
 def dim(l, check_for_error=True):
     return tuple(_dim(l, check_for_error))
 
+def filter_peaks(peaks, threshold=5):
+    prev_peaks = 0
+    new_peaks = []
+    for p in peaks:
+        if p - prev_peaks > threshold:
+            new_peaks.append(p)
+        prev_peaks = p
+    return new_peaks
+
 def distance(point1, point2):
-    x1, y1 = np.array([p[0] for p in point1]), np.array([p[1] for p in point1])
-    x2, y2 = np.array([p[0] for p in point2]), np.array([p[1] for p in point2])
+    x1 = point1[:, 0]
+    x2 = point1[:, 1]
+    y1 = point2[:, 0]
+    y2 = point2[:, 1]
+
     return np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
 
 class NaiveVideoDataset:
@@ -51,6 +63,68 @@ class NaiveVideoDataset:
         self.normalize_skeletons()
         self.global_coords()
         self.accumulated_frame_difference_energy_image()
+        self.distances = self.get_ankle_distances()
+        self.sectioned_gaits, self.labels = self.get_gait_cycles()
+        self.interpolate_by_time()
+        self.X, self.y = self.sectioned_gaits, self.labels
+
+    def interpolate_by_time(self):
+        min_frames = min([len(x) for x in self.sectioned_gaits])
+        for i in range(len(self.sectioned_gaits)):
+            curr_sample = self.sectioned_gaits[i]
+            x = np.arange(len(curr_sample))
+            f = interp1d(x, curr_sample, axis=0)
+            xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
+            ynew = f(xnew)
+            self.sectioned_gaits[i] = ynew
+        self.sectioned_gaits = np.array(self.sectioned_gaits)
+
+        # for i in range(len(skeletons)):
+        #     curr_vid = skeletons[i]
+        #     x = np.arange(0, len(curr_vid))
+        #     f = interp1d(x, curr_vid, axis=0)
+        #     xnew = np.linspace(0, len(curr_vid) - 1, min_frames)
+        #     ynew = f(xnew)
+        #     skeletons[i] = ynew
+    def get_gait_cycles(self):
+        peaks = self.get_gait_indices()
+        ret_val = []
+        new_labels = []
+        for i in range(len(peaks)):
+            curr_p = peaks[i][::2]
+            for j in range(1, len(curr_p)):
+                ret_val.append(self.raw_data[i][curr_p[j - 1]:curr_p[j]])
+                new_labels.append(self.labels[i])
+        return ret_val, np.array(new_labels)
+
+
+
+
+
+    def get_gait_indices(self):
+        filtered_peaks = []
+        for a in self.distances:
+            filtered_distances = savgol_filter(a, 9, 3)
+            peaks = find_peaks(filtered_distances)[0]
+            filtered_peaks.append(filter_peaks(peaks))
+        return filtered_peaks
+
+
+    def get_ankle_distances(self):
+        distances = []
+        for i in range(len(self.raw_data)):
+            curr_dist = []
+            for j in range(len(self.raw_data[i])):
+                x1 = self.raw_data[i][j][mp_pose.PoseLandmark.LEFT_ANKLE * 2]                
+                y1 = self.raw_data[i][j][mp_pose.PoseLandmark.LEFT_ANKLE * 2 + 1]
+                x2 = self.raw_data[i][j][mp_pose.PoseLandmark.RIGHT_ANKLE * 2]
+                y2 = self.raw_data[i][j][mp_pose.PoseLandmark.RIGHT_ANKLE * 2 + 1]
+                curr_dist.append(np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2))
+            distances.append(curr_dist)
+
+        return distances
+                
+                           
 
     def accumulated_frame_difference_energy_image(self):
         for i in range(self.X.shape[0]):
@@ -176,7 +250,8 @@ class NaiveVideoDataset:
                     new_arr.append(skeletons[i][j][k][1])
                 skeletons[i][j] = new_arr
         
-
+        self.raw_data = skeletons.copy()
+        
         # Interpolate Frames
         for i in range(len(skeletons)):
             curr_vid = skeletons[i]
@@ -225,44 +300,3 @@ class NaiveVideoDataset:
             
             return frames
 
-
-    def filter_peaks(self, peaks, threshold=5):
-        prev_peak = 0
-        new_peaks = []
-        for p in peaks:
-            if p - prev_peak > threshold:
-                new_peaks.append(p)
-            prev_peak = p
-        return new_peaks
-
-
-    def get_peaks(self, show_peaks=None):
-        vid_peaks = []
-        for i, v in enumerate(self.norm_skeletons):
-            p, f, d = self.get_vid_peaks(v)
-            if i == show_peaks:
-                plt.figure()
-                plt.plot(d)
-                plt.scatter(p, f)
-                plt.savefig("peaks.png")
-                plt.close()
-            vid_peaks.append(p)
-        return vid_peaks
-
-
-    def get_gait_cycles(self):
-        """
-        Gait cycles happen every second time ankle distances peak
-        """
-        peaks = self.get_peaks()
-        g_arr = []
-        for p in peaks:
-            g_arr.append(p[::2])
-        return g_arr
-
-    def show_gait_cycle(self, vid_seq):
-        peaks, peak_vals, distances = self.get_peaks(vid_seq)
-        plt.plot(distances)
-        plt.scatter(peaks, peak_vals)
-        plt.savefig("output.png")
-        plt.close()
