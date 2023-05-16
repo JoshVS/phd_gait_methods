@@ -6,10 +6,27 @@ import matplotlib.pyplot as plt
 
 
 from scipy.signal import savgol_filter, find_peaks
+import numpy as np
+from scipy.optimize import curve_fit
 
+def test_fun(x, dist, amp, omega, phi):
+    return dist + amp * np.cos(omega * x + phi)
 
-skel_data = NaiveVideoDataset(max_samples=None)
+skel_data = NaiveVideoDataset(max_samples=20)
 d = skel_data.distances
+
+selection = 3
+
+x = np.arange(len(d[selection]))
+params, _ = curve_fit(test_fun, x, d[selection])
+
+plt.figure()
+plt.plot(d[selection])
+
+plt.plot([test_fun(a, params[0], params[1], params[2], params[3]) for a in x])
+plt.savefig("distances/test_fun.png")
+
+quit()
 
 epochs=10000
 lr=0.00001
