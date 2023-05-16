@@ -13,6 +13,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('TkAgg')
 
+import matplotlib.animation as animation
+
 import mediapipe as mp
 mp_pose = mp.solutions.pose
 
@@ -353,6 +355,89 @@ class NaiveKinectDataset:
         # print(f"Gait Phases: {dim(self.gait_phases)}")
         # print(f"Labels: {len(self.labels)}")
         # quit()
+
+
+    def show_video(self, i, include_centroids=False):
+        frames = []
+        
+            
+        fig = plt.figure()
+        ax = fig.add_subplot()
+        for a in range(len(self.X[i])):
+            curr_frame = []
+            kps = self.X[i][a]
+            if include_centroids:
+                
+                ct, ut, lt = self.get_centroid(kps)
+                xc = [
+                    ct[0],
+                    ut[0],
+                    lt[0]
+                ]
+
+                
+                yc = [
+                    ct[1],
+                    ut[1],
+                    lt[1]
+                ]
+                
+
+
+                zc = [
+                    ct[2],
+                    ut[2],
+                    lt[2]
+                ]
+
+                
+                curr_frame.append(ax.scatter(xc, yc))
+                curr_frame.append(ax.plot(xc, yc, c='r'))
+
+            x = kps[0::3]
+            y = kps[1::3]
+            z = kps[2::3]
+
+            xline = []
+            yline = []
+            zline = []
+
+            for c in self.connections[:]:
+                c1, c2 = c
+                x1 = x[self.kp_indices[c1]]
+                x2 = x[self.kp_indices[c2]]
+                
+                y1 = y[self.kp_indices[c1]]
+                y2 = y[self.kp_indices[c2]]
+                
+                z1 = z[self.kp_indices[c1]]
+                z2 = z[self.kp_indices[c2]]
+
+                xline.append(x1)
+                xline.append(x2)
+
+                
+                yline.append(y1)
+                yline.append(y2)
+
+                
+                zline.append(z1)
+                zline.append(z2)
+
+                
+                curr_frame.append(ax.plot(xline, yline, c='b'))
+                
+                xline = []
+                yline = []
+                zline = []
+
+            
+            curr_frame.append(ax.scatter(x, y))
+            frames.append([ax.scatter(x,y)])
+        # fig.savefig("3d.png")
+        ani = animation.ArtistAnimation(fig, frames, interval=50)
+        ani.save('movie.mov')
+
 
     def ankle_distances(self, i, return_positions=False):
         lankle = self.kp_indices['Ankle-Left'] * 3

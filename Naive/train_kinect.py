@@ -22,6 +22,7 @@ def polyfunc(x, args):
     return ret
 
 ds = NaiveKinectDataset(max_samples=10)
+ds.show_video(0)
 d, l, r = ds.ankle_distances(2, return_positions=True)
 
 
