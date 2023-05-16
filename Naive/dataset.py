@@ -9,7 +9,9 @@ from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter, find_peaks
 
 from tqdm import tqdm
+import matplotlib
 import matplotlib.pyplot as plt
+matplotlib.use('TkAgg')
 
 import mediapipe as mp
 mp_pose = mp.solutions.pose
@@ -332,9 +334,10 @@ class NaiveKinectDataset:
         self.vid_skeletons, self.labels = self.reshape_skeletons()
         self.X = self.vid_skeletons
         self.translation_vector()
-        self.draw_keypoints(0,0, 5)
-        print(dim(self.vid_skeletons, check_for_error=False))
-        quit()
+        self.scaling_vector()
+        
+        self.rotation_vector(5)
+        # quit()
         # self.norm_skeletons = self.normalize_skeletons()
         
         # self.vid_features = self.extract_features()
@@ -351,13 +354,41 @@ class NaiveKinectDataset:
         # print(f"Labels: {len(self.labels)}")
         # quit()
 
+    def ankle_distances(self, i, return_positions=False):
+        lankle = self.kp_indices['Ankle-Left'] * 3
+        rankle = self.kp_indices['Ankle-Right'] * 3
+        ankle_dist = []
+        left = []
+        right = []
+        for j in range(len(self.X[i])):
+            ankle1 = self.X[i][j][lankle: lankle + 3]
+            ankle2 = self.X[i][j][rankle: rankle + 3]
+            d = np.sqrt(sum([(a - b)**2 for a, b in zip(ankle1,ankle2)]))
+            ankle_dist.append(d)
+            left.append(ankle1[2])
+            right.append(ankle2[2])
+        if return_positions:
+            return ankle_dist, left, right
 
-    def translation_vector(self):
+        return ankle_dist
+
+
+
+    def scaling_vector(self):
         for i in range(len(self.X)):
             for j in range(len(self.X[i])):
-                self.X[i][j] = self._translation_vector(self.X[i][j])
+                ct, ut, lt = self.get_centroid(self.X[i][j])
+                self.X[i][j] = self._scaling_vector(self.X[i][j], ut, lt)
 
-    def _translation_vector(self, X):
+    def _scaling_vector(self, X, ut, lt):
+        diff = [a - b for (a, b) in zip(ut, lt)]
+        scale_val = np.sqrt(sum([a**2 for a in diff]))
+        return [a / scale_val for a in X]
+
+
+
+        
+    def get_centroid(self, X):
         # Step 1: Get upper Centroid and Lower Centroid
         upper_limbs = X[:12]
         uc = [
@@ -372,10 +403,58 @@ class NaiveKinectDataset:
             sum(lower_limbs[2::3]) / 4
         ]
 
-        self.ct = np.array([(x + y) / 2 for (x, y) in zip(uc, lc)])
+        return np.array([(x + y) / 2 for (x, y) in zip(uc, lc)]), uc, lc
 
+    def rotation_vector(self, tm):
+        for i in range(len(self.X)):
+            
+            centroids = []
+            for j in range(len(self.X[i])):                
+                centroids.append( self.get_centroid(self.X[i][j]))
+
+                ct, ut, lt = centroids[-1]
+                if j > tm:
+                    ct_prev, _,_ = centroids[-1 - tm]
+                    self.X[i][j] = self._rotation_vector(self.X[i][j], self.X[i][j - tm], ct, ut, lt, ct_prev)
+
+    def _rotation_vector(self, X, Xp, ct, ut, lt, ct_prev):
+        d = np.sqrt(sum([(a - b)**2 for a, b in zip(ct, ct_prev)]))
+        rmov = [(a - b) / d for a, b in zip(ct, ct_prev)]
+
+        dcen = np.sqrt(sum([(a - b)**2 for a, b in zip(ut, lt)]))
+        rtop = [(a - b) / dcen for a, b in zip(ut, lt)]
+
+        cross_prod = np.cross(rtop, rmov)
+        dcross = np.sqrt(sum(a**2 for a in cross_prod))
+        rleft = [a / dcross for a in cross_prod]
+
+        R_mat = np.array([
+            rmov, 
+            rleft, 
+            rtop
+        ])
+        R_inv = np.linalg.inv(R_mat)
+
+        ret_val = []
+        for i in range(len(X) // 3):
+            curr_vals = X[i * 3: i * 3 + 3]
+            ret_val += list(np.dot(R_inv, curr_vals))
+
+        return ret_val
+
+
+        # cross_prod = np.cross(rtop, rmov)
+        
+
+    def translation_vector(self):
+        for i in range(len(self.X)):
+            for j in range(len(self.X[i])):
+                ct, ut, lt = self.get_centroid(self.X[i][j])
+                self.X[i][j] = self._translation_vector(self.X[i][j], ct)
+
+    def _translation_vector(self, X, ct):        
         # Step 2: Translation Vector
-        pt = self.ct.T
+        pt = ct.T
         X[0::3] -= pt[0]
         X[1::3] -= pt[1]
         X[2::3] -= pt[2]
@@ -383,13 +462,42 @@ class NaiveKinectDataset:
         return X
 
 
-    def draw_keypoints(self, i, j, k):
+    def draw_keypoints(self, i, j, num_frames=1, include_centroids=False):
         fig = plt.figure()
         ax = fig.add_subplot(projection='3d')
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
 
-        for a in range(k):
+        for a in range(num_frames):
             kps = self.X[i][j + a]
-            
+            ct, ut, lt = self.get_centroid(kps)
+            if include_centroids:
+                xc = [
+                    ct[0],
+                    ut[0],
+                    lt[0]
+                ]
+
+                
+                yc = [
+                    ct[1],
+                    ut[1],
+                    lt[1]
+                ]
+                
+
+
+                zc = [
+                    ct[2],
+                    ut[2],
+                    lt[2]
+                ]
+
+                
+                ax.scatter3D(xc, yc, zc)
+                ax.plot3D(xc, yc, zc, c='r')
+
             x = kps[0::3]
             y = kps[1::3]
             z = kps[2::3]
@@ -421,14 +529,15 @@ class NaiveKinectDataset:
                 zline.append(z2)
 
                 
-                ax.plot3D(xline, yline, zline)
+                ax.plot3D(xline, yline, zline, c='b')
                 
                 xline = []
                 yline = []
                 zline = []
 
             ax.scatter3D(x, y, z)
-        fig.savefig("3d.png")
+        # fig.savefig("3d.png")
+        plt.show()
 
     def _get_file_data(self, max_samples):
         kp_indices = {}
@@ -459,7 +568,7 @@ class NaiveKinectDataset:
                 curr_person.append(curr_file)
             ret_val.append(curr_person)
             loop.set_postfix()
-        return ret_val, kp_indices # (n_people, n_files, n_lines, 3)
+        return ret_val, kp_indices # (n_people, n_files, n_lines, 4)
 
     def reshape_skeletons(self):
         # Need skeleton to be shape (vid_seq, frame, keypoints, 2)
@@ -473,7 +582,7 @@ class NaiveKinectDataset:
                 for l in f:
                     if l[0] == "Head":
                         reshaped_skel[-1].append([])
-                    reshaped_skel[-1][-1].extend(l[1:])
+                    reshaped_skel[-1][-1] += l[1:]
                 if len(reshaped_skel[-1][-1]) % 20 != 0:
                     print(len(reshaped_skel[-1][-1]))
                     quit()
