@@ -40,10 +40,10 @@ def create_classifier(dataset, lr, loss):
     # gait_recognition_model.add(Dense(n_classes))
     # gait_recognition_model.add(BatchNormalization())
     # gait_recognition_model.add(Activation(tanh))
-    gait_recognition_model.add(Dense(1024, activation='tanh'))
-    gait_recognition_model.add(Dropout(0.9))
-    gait_recognition_model.add(Dense(512, activation='tanh'))
-    gait_recognition_model.add(Dropout(0.9))
+    gait_recognition_model.add(Dense(256, activation='tanh'))
+    # gait_recognition_model.add(Dropout(0.9))
+    gait_recognition_model.add(Dense(128, activation='tanh'))
+    # gait_recognition_model.add(Dropout(0.9))
     gait_recognition_model.add(Dense(n_classes, activation='softmax'))
     # gait_recognition_model.add(Softmax())
     gait_recognition_model.compile(
@@ -52,5 +52,23 @@ def create_classifier(dataset, lr, loss):
         metrics = TRACKING_METRICS)
     # print(dir(gait_recognition_model))
     # quit()
+    return gait_recognition_model
+
+
+def create_frame_level_classifier(dataset, lr, loss):
+    n_classes = dataset.n_classes
+    input_shape = dataset.X.shape[1] * dataset.X.shape[2]
+    gait_recognition_model = Sequential()
+    gait_recognition_model.add(Dense(2048))
+    gait_recognition_model.add(Dense(1024))
+    gait_recognition_model.add(Dense(512))
+    gait_recognition_model.add(Dense(256))
+    gait_recognition_model.add(Dense(128))
+    
+    gait_recognition_model.add(Dense(n_classes, activation='softmax'))
+    gait_recognition_model.compile(
+        loss=loss, 
+        optimizer=Adam(learning_rate=lr),
+        metrics = TRACKING_METRICS)
     return gait_recognition_model
 

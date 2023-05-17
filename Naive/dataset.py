@@ -11,7 +11,7 @@ from scipy.signal import savgol_filter, find_peaks
 from tqdm import tqdm
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.use('TkAgg')
+# matplotlib.use('TkAgg')
 
 import matplotlib.animation as animation
 from celluloid import Camera
@@ -349,6 +349,50 @@ class NaiveKinectDataset:
         self.n_classes = len(np.unique(self.y))
         self.interpolate_by_time()
         self.y = self.to_one_hot()
+        self.X = self.get_position_vectors()
+
+    def get_position_vectors(self):
+        joints = [
+            "Elbow-Left", "Elbow-Right", "Knee-Left", "Knee-Right"
+        ]
+        subset_joints = [
+            ("Elbow-Left", "Wrist-Left"),
+            ("Elbow-Right", "Wrist-Right"),
+            ("Knee-Left", "Ankle-Left"),
+            ("Knee-Right", "Ankle-Right")
+        ]
+        new_X = []
+        for i in range(self.X.shape[0]):
+            curr_person = []
+            for j in range(self.X.shape[1]):
+                ct = self.get_centroid(self.X[i,j,:])[0]
+                j_v = []
+                for jo in joints:
+                    j_coords = self.kp_indices[jo] * 3
+                    curr_j = list(self.X[i,j,j_coords:j_coords + 3])
+                    distances = [(a - b) for (a, b) in zip(curr_j, ct)]
+                    # print(type(distances))
+                    # print(type(ct))
+                    # quit()
+                    j_v.extend(list(distances))
+                for jo1, jo2 in subset_joints:
+                    j_coords1 = self.kp_indices[jo1] * 3
+                    j_coords2 = self.kp_indices[jo2] * 3
+                    
+                    curr_j1 = list(self.X[i,j,j_coords1:j_coords1 + 3])
+                    curr_j2 = list(self.X[i,j,j_coords2:j_coords2 + 3])
+                    
+                    distances = [(a - b) for (a, b) in zip(curr_j2, curr_j1)]
+                    j_v.extend(list(distances))
+                    
+
+                
+                curr_person.append(j_v)
+            new_X.append(curr_person)
+        # print(new_X[0][0][0])
+        # quit()
+        return np.array(new_X, dtype=np.float32)
+
 
     def to_one_hot(self):
         onehot_vector = np.zeros((len(self.y), self.n_classes))
@@ -870,21 +914,6 @@ class NaiveKinectDataset:
         self.labels = label_ret
         self.gait_phases = ret_val
 
-
-    def extract_features(self):
-        features = []
-        total_skels = len(self.norm_skeletons)
-        for i, vid in enumerate(self.norm_skeletons): 
-            prev_skel = None
-            frame_skels = []
-            loop = tqdm(vid)
-            for skel in loop:
-                frame_skels.append(preprocess_kinect_dataset(skel, prev_skel, self.kp_indices, self.pc))
-                prev_skel = skel
-                loop.set_postfix(vid_number=f"{i+1}/{total_skels}")
-            features.append(frame_skels)
-        return features
-    
 
     def get_gait_phases(self):
         gait_phases = [

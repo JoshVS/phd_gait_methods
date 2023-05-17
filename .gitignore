@@ -21,6 +21,7 @@ logs/
 *.mp4
 *.txt
 *.info
+*.mov
 
 # Distribution / packaging
 .Python
