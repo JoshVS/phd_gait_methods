@@ -25,7 +25,7 @@ def create_transformer(dataset, lr, loss):
 def create_classifier(dataset, lr, loss):
     n_classes = dataset.n_classes
     input_shape = dataset.X.shape[1:]
-    N = input_shape[-1]
+    N = input_shape[-1] // 3
     gait_recognition_model = Sequential()
     gait_recognition_model.add(LSTM(N, input_shape=input_shape, return_sequences=True))
     gait_recognition_model.add(BatchNormalization())

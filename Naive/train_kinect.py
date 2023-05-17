@@ -12,50 +12,38 @@ from scipy.signal import savgol_filter, find_peaks
 import numpy as np
 from scipy.optimize import curve_fit
 
-def test_fun(x, dist, amp, omega, phi):
-    return dist + amp * np.cos(omega * x + phi)
-
-def polyfunc(x, args):
-    ret = np.zeros(x.shape)
-    for i, a in enumerate(args[::-1]):
-        ret += a * x ** i
-    return ret
-
-ds = NaiveKinectDataset(max_samples=10)
-ds.show_video(1)
-d, l, r = ds.ankle_distances(2, return_positions=True)
+ds = NaiveKinectDataset(max_samples=None)
+# ds.show_video(1)
 
 
+epochs=10000
+lr=0.000001
+loss='categorical_crossentropy'
+my_classifier = create_classifier(ds, lr, loss)
 
-x = np.arange(len(d))
+run = wandb.init(
+    project="naive_classifier",
+    config={
+        "learning_rate": lr,
+        "epochs": epochs,
+    })
 
-# remove = 400
+class MyCallback(Callback):
 
-# f = np.fft.fft(d, len(d) + remove)
-# d_trans = np.fft.ifft(f[remove:])
-# print(len(d_trans), len(d))
+    def on_epoch_end(self, epoch, logs=None):
+        run.log(logs)
 
-window = 4
-d_trans = []
-for i in range(len(d)):
-    lower = 0 if i < window else i - window
-    upper = -1 if i + window >= len(d) else i + window
-    r = upper - lower
-    d_trans.append(sum(d[lower:upper]) / r)
 
-params, _ = curve_fit(test_fun, x, d_trans)
 
-d_plotted = test_fun(x, *params)
+TRAINING_CALLBACKS = [
+    MyCallback(),
+    ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=50, min_lr=0.0000001),
+    EarlyStopping(min_delta=0.001, patience=200, monitor='loss')
+]
 
-filtered_distances = savgol_filter(d_plotted, 9, 3)
-peaks = find_peaks(filtered_distances)[0]
-max_val = 50
-
-plt.figure()
-# plt.plot(d[:max_val])
-# plt.plot(d_trans)
-plt.plot(d_plotted)
-plt.scatter( peaks, [d_plotted[x] for x in peaks], c='r')
-# plt.plot(l[:max_val])
-# plt.plot(r[:max_val])
-plt.show()
+# simulating a training run
+my_classifier.fit(ds.X, 
+                  ds.y, 
+                  epochs=epochs, 
+                  callbacks=[TRAINING_CALLBACKS],
+                  validation_split=0.3)

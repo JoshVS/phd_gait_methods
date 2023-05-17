@@ -312,8 +312,9 @@ class NaiveVideoDataset:
             return frames
 
 class NaiveKinectDataset:
-    def __init__(self, directory="../KinectDataset/", max_samples=None):
+    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=9):
         self.directory = directory
+        self.t_interp = t_interp
         self.skel_data, self.kp_indices = self._get_file_data(max_samples) # (n_people, n_files, n_lines, 3)
         # print(dim(self.skel_data, check_for_error=False))
         # quit()
@@ -344,6 +345,60 @@ class NaiveKinectDataset:
         self.X = self.vid_skeletons
         self.translation_vector()
         self.scaling_vector()
+        self.X, self.y = self.get_individual_steps()
+        self.n_classes = len(np.unique(self.y))
+        self.interpolate_by_time()
+        self.y = self.to_one_hot()
+
+    def to_one_hot(self):
+        onehot_vector = np.zeros((len(self.y), self.n_classes))
+        for i in range(len(self.y)):
+            onehot_vector[i, self.y[i]] = 1
+        return onehot_vector
+
+
+
+    def interpolate_by_time(self, convert_to_numpy=True):
+        min_frames = min([len(x) for x in self.X])
+        for i in range(len(self.X)):
+            curr_sample = self.X[i]
+            x = np.arange(len(curr_sample))
+            f = interp1d(x, curr_sample, axis=0)
+            xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
+            # print(xnew, len(curr_sample))
+            # quit()
+            ynew = f(xnew)
+            self.X[i] = ynew
+        if convert_to_numpy:
+            self.X = np.array(self.X)
+        
+    # def interpolate_by_time(self):
+    #     min_frames = min([len(x) for x in self.sectioned_gaits])
+    #     for i in range(len(self.sectioned_gaits)):
+    #         curr_sample = self.sectioned_gaits[i]
+    #         x = np.arange(len(curr_sample))
+    #         f = interp1d(x, curr_sample, axis=0)
+    #         xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
+    #         ynew = f(xnew)
+    #         self.sectioned_gaits[i] = ynew
+    #     self.sectioned_gaits = np.array(self.sectioned_gaits)
+    def get_individual_steps(self):
+        peaks = self.find_peaks()
+        ret_val = []
+        ret_labels = []
+        for i in range(len(self.X)):
+            vid_peaks = peaks[i][::2]
+            vid_steps = self.X[i]
+            for j in range(len(vid_peaks[1:])):
+                r = vid_peaks[j] - vid_peaks[j - 1]
+                if r <= self.t_interp:
+                    continue
+                ret_val.append(vid_steps[vid_peaks[j-1]:vid_peaks[j]])
+                ret_labels.append(self.labels[j])
+        assert len(ret_val) == len(ret_labels)
+        return ret_val, ret_labels
+
+
 
 
     def smooth_walk(self, x, window=4):
