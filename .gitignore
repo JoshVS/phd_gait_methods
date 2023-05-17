@@ -16,6 +16,7 @@ logs/
 *.so
 
 *.pdf
+*.gif
 
 *.mp4
 *.txt

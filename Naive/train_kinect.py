@@ -22,7 +22,7 @@ def polyfunc(x, args):
     return ret
 
 ds = NaiveKinectDataset(max_samples=10)
-ds.show_video(0)
+ds.show_video(1)
 d, l, r = ds.ankle_distances(2, return_positions=True)
 
 
@@ -35,22 +35,27 @@ x = np.arange(len(d))
 # d_trans = np.fft.ifft(f[remove:])
 # print(len(d_trans), len(d))
 
-# window = 4
-# d_trans = []
-# for i in range(len(d)):
-#     lower = 0 if i < window else i - window
-#     upper = -1 if i + window >= len(d) else i + window
-#     r = upper - lower
-#     d_trans.append(sum(d[lower:upper]) / r)
+window = 4
+d_trans = []
+for i in range(len(d)):
+    lower = 0 if i < window else i - window
+    upper = -1 if i + window >= len(d) else i + window
+    r = upper - lower
+    d_trans.append(sum(d[lower:upper]) / r)
 
-# params, _ = curve_fit(test_fun, x, d_trans)
+params, _ = curve_fit(test_fun, x, d_trans)
 
+d_plotted = test_fun(x, *params)
+
+filtered_distances = savgol_filter(d_plotted, 9, 3)
+peaks = find_peaks(filtered_distances)[0]
 max_val = 50
 
 plt.figure()
 # plt.plot(d[:max_val])
 # plt.plot(d_trans)
-# plt.plot(test_fun(x, *params))
-plt.plot(l[:max_val])
-plt.plot(r[:max_val])
+plt.plot(d_plotted)
+plt.scatter( peaks, [d_plotted[x] for x in peaks], c='r')
+# plt.plot(l[:max_val])
+# plt.plot(r[:max_val])
 plt.show()

@@ -14,9 +14,16 @@ import matplotlib.pyplot as plt
 matplotlib.use('TkAgg')
 
 import matplotlib.animation as animation
-
+from celluloid import Camera
 import mediapipe as mp
 mp_pose = mp.solutions.pose
+
+def cell_callback_factory(num_frames):
+
+    def cell_callback(curr_frame, total_frames):
+        if curr_frame % (num_frames // 10) == 0:
+            print(f"Frame {curr_frame} / {num_frames}")
+    return cell_callback
 
 
 def _dim(l, check_for_error):
@@ -337,35 +344,54 @@ class NaiveKinectDataset:
         self.X = self.vid_skeletons
         self.translation_vector()
         self.scaling_vector()
+
+
+    def smooth_walk(self, x, window=4):
+        d_trans = []
+        for i in range(len(x)):
+            lower = 0 if i < window else i - window
+            upper = -1 if i + window >= len(x) else i + window
+            r = upper - lower
+            d_trans.append(sum(x[lower:upper]) / r)
+        return d_trans
         
-        self.rotation_vector(5)
-        # quit()
-        # self.norm_skeletons = self.normalize_skeletons()
+
+    def _find_peaks_for_video(self, i):
+        d = self.smooth_walk(self.ankle_distances(i))
+        filtered_distances = savgol_filter(d, 9, 3)
+        peaks = find_peaks(filtered_distances)[0]
+        return peaks
+    
+    def find_peaks(self):
+        peaks = []
+        for i in range(len(self.X)):
+            peaks.append(self._find_peaks_for_video(i))
+        return peaks
+
+
         
-        # self.vid_features = self.extract_features()
-
-        # self.gait_cycles = self.get_gait_cycles()
-        # print(dim(self.gait_cycles))
-        # quit()
-        # self.gait_phases = self.get_gait_phases()
-        # self.compress_gait_phases()
-        # self.n_classes = len(np.unique(self.labels))
-        # self.shape = dim(self.gait_phases)
-
-        # print(f"Gait Phases: {dim(self.gait_phases)}")
-        # print(f"Labels: {len(self.labels)}")
-        # quit()
-
 
     def show_video(self, i, include_centroids=False):
         frames = []
+        loop = tqdm(range(len(self.X[i])))
+        ankles, l, r = self.ankle_distances(i, return_positions=True)
+        peaks = self._find_peaks_for_video(i)[::2]
+        step_count = 1
         
-            
-        fig = plt.figure()
-        ax = fig.add_subplot()
-        for a in range(len(self.X[i])):
+        fig, ax = plt.subplots(2)
+        # ax = fig.add_subplot()
+        # ankle_ax = fig.add_subplot()
+        ax, ankle_ax = ax[0], ax[1]
+        camera = Camera(fig)
+        
+        print("Generating Video...")
+        for a in loop:
+            if peaks[(step_count - 1) % len(peaks)] < a < peaks[(step_count) % len(peaks)] :
+                step_count += 1
             curr_frame = []
             kps = self.X[i][a]
+            ax.legend([f"Step Count: {step_count}"])
+            ankle_ax.plot(ankles[:a])
             if include_centroids:
                 
                 ct, ut, lt = self.get_centroid(kps)
@@ -391,8 +417,10 @@ class NaiveKinectDataset:
                 ]
 
                 
-                curr_frame.append(ax.scatter(xc, yc))
-                curr_frame.append(ax.plot(xc, yc, c='r'))
+                # curr_frame.append(ax.scatter(xc, yc))
+                # curr_frame.append(ax.plot(xc, yc, c='r'))
+                ax.scatter(xc, yc)
+                ax.plot(xc, yc, c='r')
 
             x = kps[0::3]
             y = kps[1::3]
@@ -425,18 +453,26 @@ class NaiveKinectDataset:
                 zline.append(z2)
 
                 
-                curr_frame.append(ax.plot(xline, yline, c='b'))
+                # curr_frame.append(ax.plot(xline, yline, c='b'))
+                ax.plot(xline, yline, c='b')
                 
                 xline = []
                 yline = []
                 zline = []
 
             
-            curr_frame.append(ax.scatter(x, y))
-            frames.append([ax.scatter(x,y)])
+            # curr_frame.append(ax.scatter(x, y))
+            # frames.append([ax.scatter(x,y)])
+            ax.scatter(x,y)
+            camera.snap()
+            loop.set_postfix()
         # fig.savefig("3d.png")
-        ani = animation.ArtistAnimation(fig, frames, interval=50)
-        ani.save('movie.mov')
+        print("Rendering Video")
+        # ani = animation.ArtistAnimation(fig, frames, interval=50)
+        animation = camera.animate()
+        print("Writing Video")
+        animation.save("plots.gif", writer='imagemagick', progress_callback=cell_callback_factory(len(self.X[i])))
+        # ani.save('movie.mp4')
 
 
     def ankle_distances(self, i, return_positions=False):
