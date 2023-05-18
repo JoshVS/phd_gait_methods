@@ -28,6 +28,12 @@ class LinearAssignmentClassifier():
         self.X, self.y, self.q = self.create_gallery(self.X, self.y, self.q)
         self.create_cost_matrix(dataset.X_test[0:8])
 
+    def hungarian_algorithm(self, cost_matrix):
+        # Takes in cost matrix array of shape (n_timesteps, n_columns, 3)
+        # Multiplies with quality matrix
+        # Returns Y, which should be individual votes
+        # Y should only be shape (3,)
+
 
     def create_cost_matrix(self, X):
         cost_matrices = []
