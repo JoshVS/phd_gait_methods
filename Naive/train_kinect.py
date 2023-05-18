@@ -7,8 +7,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter, find_peaks
 
-
-from scipy.signal import savgol_filter, find_peaks
 import numpy as np
 from scipy.optimize import curve_fit
 
@@ -17,10 +15,10 @@ ds = NaiveKinectDataset(max_samples=None)
 
 
 epochs=10000
-lr=0.00001
+lr=0.001
 loss='categorical_crossentropy'
-my_classifier = create_classifier(ds, lr, loss)
-# my_classifier = create_frame_level_classifier(ds, lr, loss)
+# my_classifier = create_classifier(ds, lr, loss)
+my_classifier = create_frame_level_classifier(ds, lr, loss)
 
 run = wandb.init(
     project="naive_classifier",
@@ -44,14 +42,14 @@ TRAINING_CALLBACKS = [
 
 x_frame_level = ds.X.reshape(ds.X.shape[0], ds.X.shape[1] * ds.X.shape[2])
 
-# my_classifier.fit(x_frame_level,
-#                   ds.y, 
-#                   epochs=epochs, 
-#                   callbacks=[TRAINING_CALLBACKS],
-#                   validation_split=0.3)
-# simulating a training run
-my_classifier.fit(ds.X, 
+my_classifier.fit(x_frame_level,
                   ds.y, 
                   epochs=epochs, 
                   callbacks=[TRAINING_CALLBACKS],
                   validation_split=0.3)
+# simulating a training run
+# my_classifier.fit(ds.X, 
+#                   ds.y, 
+#                   epochs=epochs, 
+#                   callbacks=[TRAINING_CALLBACKS],
+#                   validation_split=0.3)

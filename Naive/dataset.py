@@ -2,11 +2,11 @@ import os
 
 import numpy as np
 import cv2
-
+from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
 from scipy.interpolate import interp1d
 
-from scipy.signal import savgol_filter, find_peaks
+from scipy.signal import savgol_filter, find_peaks, argrelmax, argrelmin
 
 from tqdm import tqdm
 import matplotlib
@@ -348,8 +348,43 @@ class NaiveKinectDataset:
         self.X, self.y = self.get_individual_steps()
         self.n_classes = len(np.unique(self.y))
         self.interpolate_by_time()
+        self.q = self.quality_matrices()
+        self.adjust_for_quality()
+        self.y_raw = self.y.copy()
         self.y = self.to_one_hot()
         self.X = self.get_position_vectors()
+        self.split_train_and_test()
+
+
+    def adjust_for_quality(self):
+        for i in range(self.X.shape[0]):
+            for j in range(self.X.shape[1]):
+                self.X[i, j, :] *= 1 / self.q[i, j]
+
+
+    def quality_matrices(self):
+        def dist(a, b):
+            return np.sqrt(np.sum([(x - y)**2 for (x, y) in zip(a, b)]))
+        qualities = []
+        for i in range(self.X.shape[0]):
+            vid_qualities = []
+            for j in range(self.X.shape[1]):
+                def get_indices(ind_str):
+                    return self.X[i, j, 3 * self.kp_indices[ind_str]:3 * self.kp_indices[ind_str] + 3]
+                
+                left_arm = get_indices("Elbow-Left")
+                right_arm = get_indices("Elbow-Right")
+                left_leg = get_indices("Knee-Left")
+                right_leg = get_indices("Knee-Right")
+
+                ct, _, _ = self.get_centroid(self.X[i,j,:])
+                qarm = dist(ct, left_arm) / dist(ct, right_arm)
+                qleg = dist(ct, left_leg) / dist(ct, right_leg)
+                vid_qualities.append(min(qleg, qarm))
+            qualities.append(vid_qualities)
+        return np.array(qualities)
+
+
 
     def get_position_vectors(self):
         joints = [
@@ -394,6 +429,9 @@ class NaiveKinectDataset:
         return np.array(new_X, dtype=np.float32)
 
 
+    def split_train_and_test(self, split=0.3):
+        self.X_train, self.X_test, self.y_train, self.y_test, self.y_raw_train, self.y_raw_test, self.q_train, self.q_test = train_test_split(self.X, self.y, self.y_raw, self.q, test_size=split)
+
     def to_one_hot(self):
         onehot_vector = np.zeros((len(self.y), self.n_classes))
         for i in range(len(self.y)):
@@ -431,14 +469,15 @@ class NaiveKinectDataset:
         ret_val = []
         ret_labels = []
         for i in range(len(self.X)):
-            vid_peaks = peaks[i][::2]
+            vid_peaks = peaks[i]
             vid_steps = self.X[i]
-            for j in range(len(vid_peaks[1:])):
+            for j in range(1, len(vid_peaks[1:])):
+                # print(j)
                 r = vid_peaks[j] - vid_peaks[j - 1]
                 if r <= self.t_interp:
                     continue
                 ret_val.append(vid_steps[vid_peaks[j-1]:vid_peaks[j]])
-                ret_labels.append(self.labels[j])
+                ret_labels.append(self.labels[i])
         assert len(ret_val) == len(ret_labels)
         return ret_val, ret_labels
 
@@ -458,7 +497,25 @@ class NaiveKinectDataset:
     def _find_peaks_for_video(self, i):
         d = self.smooth_walk(self.ankle_distances(i))
         filtered_distances = savgol_filter(d, 9, 3)
-        peaks = find_peaks(filtered_distances)[0]
+        max_peaks = argrelmax(filtered_distances)[0]
+        min_peaks = argrelmin(filtered_distances)[0]
+        # print(max_peaks)
+        # print(min_peaks)
+        peaks = np.sort(np.concatenate([min_peaks, max_peaks]))
+        max_peaks_match = False
+        test_max = peaks[::2] == max_peaks
+        if type(test_max) != bool:
+            test_max = test_max.all()
+        max_peaks_match = max_peaks_match or test_max
+        
+        test_max = peaks[1::2] == max_peaks
+        if type(test_max) != bool:
+            test_max = test_max.all()
+        max_peaks_match = max_peaks_match or test_max
+
+        assert max_peaks_match
+        
+
         return peaks
     
     def find_peaks(self):
@@ -757,7 +814,7 @@ class NaiveKinectDataset:
 
             ax.scatter3D(x, y, z)
         # fig.savefig("3d.png")
-        plt.show()
+        # plt.show()
 
     def _get_file_data(self, max_samples):
         kp_indices = {}
