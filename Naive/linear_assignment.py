@@ -7,6 +7,10 @@ import matplotlib
 # matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score, accuracy_score
+import seaborn as sns
+
+from hungarian import hungarian_algorithm_method
 
 def manhattan_distance(a, b):
     d = 0
@@ -26,14 +30,50 @@ class LinearAssignmentClassifier():
         
         self.y = self.remove_one_hot(self.y)
         self.X, self.y, self.q = self.create_gallery(self.X, self.y, self.q) # (n_features//3, n_classes * n_samples * n_timesteps, 3)
-        cm = self.create_cost_matrix(dataset.X_test[0:8])
+        cm = self.create_cost_matrix(dataset.X_test[0:5])
         y_test_new = self.remove_one_hot(dataset.y_test)
+        gait_validation = self.classify_gait(cm, hungarian=True)
         
+        gait_predictions = self.classify_gait(cm)
+        if gait_validation != gait_predictions:
+            print("Non-Matching Solutions. Hungarian Algorithm first, then Brute")
+            print(gait_validation)
+            print(gait_predictions)
+            quit()
+        assert gait_predictions == gait_validation
+        y_pred = self.classify_individual_steps(gait_predictions)
+        print(y_test_new[0:5])
+        print(y_pred)
+        self.report_metrics(y_test_new[0:5], y_pred)
 
-        y_pred = self.classify_gait(cm)
-        print(y_test_new[0:8])
-        print(self.classify_individual_steps(y_pred))
         quit()
+
+    def report_metrics(self, y_true, y_pred):
+        precision = precision_score(y_true, y_pred, average='macro')
+        recall = recall_score(y_true, y_pred, average='macro')
+        f1 = f1_score(y_true, y_pred, average='macro')
+
+        accuracy = accuracy_score(y_true, y_pred)
+
+        cm = confusion_matrix(y_true, y_pred)
+
+        out_str = f"""###############################################
+        Precision: {precision:.3f}
+        Recall: {recall:.3f}
+        F1: {f1:.3f}
+        Accuracy: {accuracy:.3f}
+
+###############################################
+        """
+        with open("results.txt", 'w') as outfile:
+            outfile.write(out_str)
+        print(out_str)
+
+        sns.heatmap(cm, annot=True)
+        plt.savefig("confusion_matrix.png")
+
+
+
 
     def classify_individual_steps(self, gait_classifications):
         ret_vals = []
@@ -44,15 +84,37 @@ class LinearAssignmentClassifier():
 
 
 
-    def classify_gait(self, cm):
+    def classify_gait(self, cm, hungarian=False):
         ret_vals = []
         loop = tqdm(range(len(cm)))
         for i in loop:
-            ret_vals.append(self.hungarian_algorithm(cm, self.y, i))
+            if hungarian:
+                ret_vals.append(self.hungarian_algorithm(cm, self.y, i))
+            else:
+                ret_vals.append(self.brute_algorithm(cm, self.y, i))    
         return ret_vals
 
-
     def hungarian_algorithm(self, cost_matrix, labels, sample_number):
+        gait_phase = sample_number % 4
+        # Takes in cost matrix array of shape (n_samples, n_columns, 3)
+        # Multiplies with quality matrix
+        # Returns Y, which should be individual votes
+        # Y should only be shape (3,)
+        overall_solutions = []
+        for t in range(cost_matrix[sample_number].shape[0]): # Per timestep
+            print(cost_matrix[sample_number][t,:,:].shape)
+            pos = hungarian_algorithm_method(cost_matrix[sample_number][t,:,:])
+            choices = [None, None, None]
+            for i, c in pos:
+                choices[i] = c
+            print(pos)
+            x_choice, y_choice, z_choice = choices[0], choices[1], choices[2]
+            values, counts = np.unique([labels[gait_phase][x_choice], labels[gait_phase][y_choice], labels[gait_phase][z_choice]], return_counts=True)
+            overall_solutions.append(values[counts.argmax()])
+        return overall_solutions
+
+
+    def brute_algorithm(self, cost_matrix, labels, sample_number):
         gait_phase = sample_number % 4
         # Takes in cost matrix array of shape (n_samples, n_columns, 3)
         # Multiplies with quality matrix
@@ -112,7 +174,7 @@ class LinearAssignmentClassifier():
         new_y = np.empty((y.shape[0],))
         for i in range(y.shape[0]):
             new_y[i] = np.argmax(y[i,:])
-        return new_y
+        return new_y.astype(np.int32)
 
 
     def create_gallery(self, X, y, q):
