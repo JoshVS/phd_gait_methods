@@ -378,8 +378,8 @@ class NaiveKinectDataset:
                 right_leg = get_indices("Knee-Right")
 
                 ct, _, _ = self.get_centroid(self.X[i,j,:])
-                qarm = dist(ct, left_arm) / dist(ct, right_arm)
-                qleg = dist(ct, left_leg) / dist(ct, right_leg)
+                qarm = min(dist(ct, left_arm) / dist(ct, right_arm), dist(ct, right_arm) / dist(ct, left_arm))
+                qleg = min(dist(ct, left_leg) / dist(ct, right_leg), dist(ct, right_leg) / dist(ct, left_leg))
                 vid_qualities.append(min(qleg, qarm))
             qualities.append(vid_qualities)
         return np.array(qualities)

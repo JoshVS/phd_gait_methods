@@ -31,6 +31,15 @@ class LinearAssignmentClassifier():
         
         self.y = self.remove_one_hot(self.y)
         self.X, self.y, self.q = self.create_gallery(self.X, self.y, self.q) # (n_features//3, n_classes * n_samples * n_timesteps, 3)
+        print(np.unique(self.y[0], return_counts=True)[1].min())
+        print(self.X[0].shape)
+        # self.X, self.y, self.q = self.balance_classes(self.X, self.y, self.q)
+        # print(self.X[0].shape)
+        # quit()
+        self.X = self.adjust_cost_for_quality(self.X)
+        # print(self.X[0].shape, self.q[0].shape)
+        # print(len(self.X), len(self.q))
+        # quit()
         cm = self.create_cost_matrix(dataset.X_test)
         y_test_new = self.remove_one_hot(dataset.y_test)
         gait_predictions = self.classify_gait(cm, hungarian=True)
@@ -48,6 +57,38 @@ class LinearAssignmentClassifier():
         self.report_metrics(y_test_new, y_pred)
 
         quit()
+
+    def balance_classes(self, X, y, q):
+        for i in range(len(X)):
+            X[i], y[i], q[i] = self._balance_classes(X[i], y[i], q[i])
+        return X, y, q
+
+    def _balance_classes(self, X, y, q):
+        classes, class_counts = np.unique(y, return_counts=True)
+        c_limiter = np.min(class_counts)
+        limits = []
+        for c, count in zip(classes, class_counts):
+            curr_limiter = c_limiter * 2 if count > c_limiter * 2 else count
+            limits.append(curr_limiter)
+            start_ind = sum(limits) + curr_limiter
+            end_ind = (sum(limits)) + count
+            X = np.delete(X, list(range(start_ind, end_ind)), axis=1)            
+            q = np.delete(q, list(range(start_ind, end_ind)), axis=0)
+            y = np.delete(y, list(range(start_ind, end_ind)), axis=0)
+        return X, y, q
+        # print(X.shape)
+        # print(len(classes) * c_limiter)
+        # quit()
+
+
+    def adjust_cost_for_quality(self, X):
+        assert len(X) == len(self.q)
+        for i in range(len(X)):
+            for j in range(X[i].shape[0]):
+                for k in range(X[i].shape[2]):
+                    X[i][j,:,k] /= self.q[i]
+        return X
+
 
     def report_metrics(self, y_true, y_pred):
         precision = precision_score(y_true, y_pred, average='macro')
@@ -70,8 +111,31 @@ class LinearAssignmentClassifier():
             outfile.write(out_str)
         print(out_str)
 
-        sns.heatmap(cm, annot=False)
+        sns.heatmap(cm, annot=(cm.shape[0] <= 5))
+        plt.xlabel("Predicted")
+        plt.ylabel("True")
         plt.savefig("confusion_matrix.png")
+        plt.close()
+
+
+        n_classes = len(np.unique(y_true))
+        # print(type(y_true))
+        # quit()
+        true_counts = [len(y_true[np.where(y_true == x)]) for x in np.unique(y_true)]
+        trues_and_falses = [a == b for (a, b) in zip(y_true, y_pred)]
+        predicted_counts = []
+        for i in range(len(np.unique(y_true))):
+            tmp = []
+            for j in range(len(np.where(y_true == np.unique(y_true)[i])[0])):
+                tmp.append(trues_and_falses[j])
+            predicted_counts.append(sum(tmp))
+
+        # predicted_counts = [sum(trues_and_falses[np.where(y_true == x)]) for x in np.unique(y_true)]
+        out_data = [a / b for (a, b) in zip(predicted_counts, true_counts)]
+        plt.figure()
+        sns.barplot(x=np.arange(n_classes),y= out_data)
+        plt.savefig("barplot.png")
+        plt.close()
 
 
 
@@ -117,6 +181,11 @@ class LinearAssignmentClassifier():
             x_choice, y_choice, z_choice = choices[0], choices[1], choices[2]
             values, counts = np.unique([labels[gait_phase][x_choice], labels[gait_phase][y_choice], labels[gait_phase][z_choice]], return_counts=True)
             overall_solutions.append(values[counts.argmax()])
+            # TODO: s_similarity: 1 / column
+            # TODO: Second Choice: Remove all choices for current class
+            # TODO: S_margin: second_choice / first_choice if first_choice < second_choice, 0 otherwise
+            # TODO: matching_score[t] = quality * s_similarity * s_margin
+        # TODO: max(matching_score)
         return overall_solutions
 
 
@@ -305,7 +374,7 @@ class LinearAssignmentClassifier():
 
 
 
-ds = NaiveKinectDataset(max_samples=40)
+ds = NaiveKinectDataset(max_samples=2)
 # print(ds.n_classes)
 # quit()
 classifier = LinearAssignmentClassifier(ds)
