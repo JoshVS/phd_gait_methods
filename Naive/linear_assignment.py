@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score, accuracy_score
 import seaborn as sns
-
-from hungarian import hungarian_algorithm_method
+from scipy.optimize import linear_sum_assignment as hungarian_algorithm_method
+# from hungarian import hungarian_algorithm_method
 
 def manhattan_distance(a, b):
     d = 0
@@ -22,6 +22,7 @@ class LinearAssignmentClassifier():
     def __init__(self, dataset):
         self.dataset = dataset
         self.X = dataset.X_train
+        
         self.y = dataset.y_train
         self.q = dataset.q_train
 
@@ -30,21 +31,21 @@ class LinearAssignmentClassifier():
         
         self.y = self.remove_one_hot(self.y)
         self.X, self.y, self.q = self.create_gallery(self.X, self.y, self.q) # (n_features//3, n_classes * n_samples * n_timesteps, 3)
-        cm = self.create_cost_matrix(dataset.X_test[0:5])
+        cm = self.create_cost_matrix(dataset.X_test)
         y_test_new = self.remove_one_hot(dataset.y_test)
-        gait_validation = self.classify_gait(cm, hungarian=True)
+        gait_predictions = self.classify_gait(cm, hungarian=True)
         
-        gait_predictions = self.classify_gait(cm)
-        if gait_validation != gait_predictions:
-            print("Non-Matching Solutions. Hungarian Algorithm first, then Brute")
-            print(gait_validation)
-            print(gait_predictions)
-            quit()
-        assert gait_predictions == gait_validation
+        # gait_predictions = self.classify_gait(cm)
+        # if gait_validation != gait_predictions:
+        #     print("Non-Matching Solutions. Hungarian Algorithm first, then Brute")
+        #     print(gait_validation)
+        #     print(gait_predictions)
+        #     quit()
+        # assert gait_predictions == gait_validation
         y_pred = self.classify_individual_steps(gait_predictions)
-        print(y_test_new[0:5])
+        print(y_test_new)
         print(y_pred)
-        self.report_metrics(y_test_new[0:5], y_pred)
+        self.report_metrics(y_test_new, y_pred)
 
         quit()
 
@@ -69,7 +70,7 @@ class LinearAssignmentClassifier():
             outfile.write(out_str)
         print(out_str)
 
-        sns.heatmap(cm, annot=True)
+        sns.heatmap(cm, annot=False)
         plt.savefig("confusion_matrix.png")
 
 
@@ -101,13 +102,18 @@ class LinearAssignmentClassifier():
         # Returns Y, which should be individual votes
         # Y should only be shape (3,)
         overall_solutions = []
+        # print(cost_matrix[sample_number].shape)
+        # print(len(cost_matrix))
+        # quit()
         for t in range(cost_matrix[sample_number].shape[0]): # Per timestep
-            print(cost_matrix[sample_number][t,:,:].shape)
-            pos = hungarian_algorithm_method(cost_matrix[sample_number][t,:,:])
+
+
+            columns, rows = hungarian_algorithm_method(cost_matrix[sample_number][t,:,:])
+            # print(pos)
+            # quit()
             choices = [None, None, None]
-            for i, c in pos:
-                choices[i] = c
-            print(pos)
+            for c, r in zip(columns, rows):
+                choices[r] = c
             x_choice, y_choice, z_choice = choices[0], choices[1], choices[2]
             values, counts = np.unique([labels[gait_phase][x_choice], labels[gait_phase][y_choice], labels[gait_phase][z_choice]], return_counts=True)
             overall_solutions.append(values[counts.argmax()])
@@ -146,6 +152,8 @@ class LinearAssignmentClassifier():
 
 
     def create_cost_matrix(self, X):
+        # print(X.shape)
+        # quit()
         cost_matrices = []
         loop = tqdm(range(X.shape[0]))
         print("Creating cost matrix")
@@ -153,19 +161,89 @@ class LinearAssignmentClassifier():
             curr_cycle = i % 4
             curr_s = X[i]
             cost_matrix_for_this_test_sample = [] # Should be shape (n_timesteps, n_cols, 3)
-            for t in range(curr_s.shape[0]): # Per timestep
+            
+            cost_matrix_for_this_test_sample_test = [] # Should be shape (n_timesteps, n_cols, 3)
+            to_add = curr_s.reshape(-1, curr_s.shape[-1]//3, 3)
+
+            feature_vector = np.transpose(self.X[curr_cycle], (1,0, 2)).astype(np.float64)
+            
+            for t in range(to_add.shape[0]): # Per timestep
+                # print(to_add.dtype, feature_vector.dtype, self.X[curr_cycle].dtype)
+                # quit()
+                # cost_matrix_for_this_timestamp_test = np.abs(to_add[t,...].astype(np.float64) - feature_vector).sum(axis=1) #self.X[curr_cycle].reshape((self.X[curr_cycle].shape[1],) + to_add[t,...].shape))
+                # test = None
+                # for i1 in range(to_add.shape[1]):
+                #     for i2 in range(to_add.shape[2]):
+                #         if test is None:
+                #             test = np.abs(self.X[curr_cycle][i1, :, :] - to_add[t, i1, :]).astype(np.float64)
+                #         else:
+                #             test += np.abs(self.X[curr_cycle][i1, :, :] - to_add[t, i1, :]).astype(np.float64)
+
+                # print(test == cost_matrix_for_this_timestamp_test)
+                # print(test.dtype, cost_matrix_for_this_timestamp_test.dtype)
+                # quit()
+                # cost_matrix_for_this_timestamp_test = test
+
+                # print(cost_matrix_for_this_timestamp_test.shape)
+                # quit()
+                # cost_matrix_for_this_timestamp_test = cost_matrix_for_this_timestamp_test.sum(axis=1)
+                # print(cost_matrix_for_this_timestamp_test.shape)
+                # quit()
+                # cost_matrix_for_this_timestamp = subtractions_per_feature
+                # print(cost_matrix_for_this_timestamp_test.shape, to_add.shape)
+                # quit()
+                # a = None
+                # for f in range(cost_matrix_for_this_timestamp_test.shape[1]):
+                #     if a is None:
+                #         a = cost_matrix_for_this_timestamp_test[:,f,:]
+                #     else:
+                #         a = a + cost_matrix_for_this_timestamp_test[:,f,:]
+                # cost_matrix_for_this_timestamp_test = a
+
                 
                 cost_matrix_for_this_timestamp = []
-                for g in range(self.X[curr_cycle].shape[1]): # Per column
-                    curr_row = [
-                        manhattan_distance(curr_s[t, 0::3], self.X[curr_cycle][:, g, 0]),
-                        manhattan_distance(curr_s[t, 1::3], self.X[curr_cycle][:, g, 1]),                    
-                        manhattan_distance(curr_s[t, 2::3], self.X[curr_cycle][:, g, 2])
-                    ]
-                    cost_matrix_for_this_timestamp.append(np.array(curr_row))
-                cost_matrix_for_this_test_sample.append(np.array(cost_matrix_for_this_timestamp))
+                # print(self.X[curr_cycle].shape)
+                # print(curr_s.shape)
+                # quit()
+                cost_matrix_for_this_timestamp = np.array([np.abs(curr_s[t, x::3] - self.X[curr_cycle][:, :, x].T).astype(np.float64).sum(axis=1) for x in range(3)]).T
+                # test2 = 
 
+                # for g in range(self.X[curr_cycle].shape[1]): # Per column
+                #     curr_row = [
+                #         manhattan_distance(curr_s[t, 0::3], self.X[curr_cycle][:, g, 0]),
+                #         manhattan_distance(curr_s[t, 1::3], self.X[curr_cycle][:, g, 1]),
+                #         manhattan_distance(curr_s[t, 2::3], self.X[curr_cycle][:, g, 2])
+                #     ]
+                #     x_test = manhattan_distance(curr_s[t, 0::3], self.X[curr_cycle][:, g, 0])
+                #     curr_row = [np.abs(curr_s[t, x::3] - self.X[curr_cycle][:, g, x]).astype(np.float64).sum() for x in range(3)]
+                #     # curr_row = np.abs(curr_s.reshape(-1, 8, 3)[t,...] - self.X[curr_cycle][:, g, :])
+                #     # print(curr_row)
+                #     # quit()
+                #     cost_matrix_for_this_timestamp.append(np.array(curr_row).astype(np.float64))
+                # print((np.array(cost_matrix_for_this_timestamp) == cost_matrix_for_this_timestamp_test))
+                # print(np.array(cost_matrix_for_this_timestamp).dtype, cost_matrix_for_this_timestamp_test.dtype)
+                # print(test2.shape)
+                # print((np.array(cost_matrix_for_this_timestamp) == test2).all() )
+                # print(cost_matrix_for_this_timestamp_test.shape, np.array(cost_matrix_for_this_timestamp).shape)
+                
+                # print((np.array(cost_matrix_for_this_timestamp) - cost_matrix_for_this_timestamp_test))
+                # print(np.where(np.array(cost_matrix_for_this_timestamp) == cost_matrix_for_this_timestamp_test))
+                # quit()
+
+                cost_matrix_for_this_test_sample.append(np.array(cost_matrix_for_this_timestamp))
+                # cost_matrix_for_this_test_sample.append(cost_matrix_for_this_timestamp_test)
+                # cost_matrix_for_this_test_sample_test.append(cost_matrix_for_this_timestamp_test)
+                # print(cost_matrix_for_this_timestamp_test.shape)
+                # quit()
+
+            # print(np.array(cost_matrix_for_this_test_sample_test).shape)
+            # print(np.array(cost_matrix_for_this_test_sample).shape)
+            # print(np.array(cost_matrix_for_this_test_sample) == np.array(cost_matrix_for_this_test_sample_test))
+            # quit()
+            # cost_matrices.append(np.array(cost_matrix_for_this_test_sample))
             cost_matrices.append(np.array(cost_matrix_for_this_test_sample))
+        # print()
+        # quit()
         return cost_matrices
 
 
@@ -227,5 +305,7 @@ class LinearAssignmentClassifier():
 
 
 
-ds = NaiveKinectDataset(max_samples=3)
+ds = NaiveKinectDataset(max_samples=40)
+# print(ds.n_classes)
+# quit()
 classifier = LinearAssignmentClassifier(ds)
