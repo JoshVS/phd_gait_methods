@@ -312,7 +312,7 @@ class NaiveVideoDataset:
             return frames
 
 class NaiveKinectDataset:
-    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=9):
+    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6):
         self.directory = directory
         self.t_interp = t_interp
         self.skel_data, self.kp_indices = self._get_file_data(max_samples) # (n_people, n_files, n_lines, 3)
@@ -429,7 +429,7 @@ class NaiveKinectDataset:
         return np.array(new_X, dtype=np.float32)
 
 
-    def split_train_and_test(self, split=0.3):
+    def split_train_and_test(self, split=0.1):
         self.X_train, self.X_test, self.y_train, self.y_test, self.y_raw_train, self.y_raw_test, self.q_train, self.q_test = train_test_split(self.X, self.y, self.y_raw, self.q, test_size=split)
 
     def to_one_hot(self):
