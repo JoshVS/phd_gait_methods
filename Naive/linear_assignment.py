@@ -36,11 +36,13 @@ class LinearAssignmentClassifier():
         # self.X, self.y, self.q = self.balance_classes(self.X, self.y, self.q)
         # print(self.X[0].shape)
         # quit()
-        self.X = self.adjust_cost_for_quality(self.X)
+        # self.X = self.adjust_cost_for_quality(self.X)
         # print(self.X[0].shape, self.q[0].shape)
         # print(len(self.X), len(self.q))
         # quit()
         cm = self.create_cost_matrix(dataset.X_test)
+        cm = self.adjust_cost_for_quality(cm)
+        # print(self.q[0].shape)
         y_test_new = self.remove_one_hot(dataset.y_test)
         # print(dataset.X_test.shape, dataset.q_test.shape)
         # quit()
@@ -81,11 +83,14 @@ class LinearAssignmentClassifier():
 
 
     def adjust_cost_for_quality(self, X):
-        assert len(X) == len(self.q)
         for i in range(len(X)):
             for j in range(X[i].shape[0]):
                 for k in range(X[i].shape[2]):
-                    X[i][j,:,k] /= self.q[i]
+                    X[i][j,:, k] /= self.q[i%4]
+        # for i in range(len(X)):
+        #     for j in range(X[i].shape[0]):
+        #         for k in range(X[i].shape[2]):
+        #             X[i][j,:,k] /= self.q[i]
         return X
 
 
@@ -150,13 +155,22 @@ class LinearAssignmentClassifier():
 
     def classify_gait(self, cm, q, hungarian=False):
         ret_vals = []
+        vote_vals = []
         print("Running Linear Matching Algorithm")
         loop = tqdm(range(len(cm)))
         for i in loop:
             if hungarian:
-                ret_vals.append(self.hungarian_algorithm(cm, self.y, i, q))
+                vote_vals.append(self.hungarian_algorithm(cm, self.y, i, q))
+                if len(vote_vals) == 4:
+                    values, counts = np.unique(vote_vals, return_counts=True)
+                    # ret_vals.extend([values[counts.argmax()] ] * 4)
+                    ret_vals.extend(vote_vals)
+                    vote_vals = []
             else:
-                ret_vals.append(self.brute_algorithm(cm, self.y, i))    
+                vote_vals.append(self.brute_algorithm(cm, self.y, i))
+        values, counts = np.unique(vote_vals, return_counts=True)
+        # ret_vals.extend([values[counts.argmax()]] * len(vote_vals))
+        ret_vals.extend(vote_vals)
         return ret_vals
 
     def hungarian_algorithm(self, cost_matrix, labels, sample_number, q):
@@ -207,6 +221,8 @@ class LinearAssignmentClassifier():
             second_score = sum([cost_matrix[sample_number][t, second_choices[x], x] for x in range(len(second_choices))])
             s_similarity = 1 / first_score
             s_margin = 0 if first_score >= second_score else second_score / first_score
+
+            
 
             s_total = q[sample_number, t] * s_similarity * s_margin
 
@@ -343,7 +359,7 @@ class LinearAssignmentClassifier():
 
 
 
-ds = NaiveKinectDataset(max_samples=20)
+ds = NaiveKinectDataset(max_samples=50)
 # print(ds.n_classes)
 # quit()
 classifier = LinearAssignmentClassifier(ds)
