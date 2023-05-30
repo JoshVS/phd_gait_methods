@@ -170,6 +170,7 @@ class LinearAssignmentClassifier():
         # print(len(cost_matrix))
         # quit()
         matching_scores = []
+        s_acc = [0] * len(np.unique(labels[gait_phase]))
         for t in range(cost_matrix[sample_number].shape[0]): # Per timestep
 
 
@@ -188,6 +189,7 @@ class LinearAssignmentClassifier():
             y_change_indices = np.where(np.array(labels[gait_phase]) == labels[gait_phase][y_choice])[0]
             z_change_indices = np.where(np.array(labels[gait_phase]) == labels[gait_phase][z_choice])[0]
 
+            first_score = sum([cost_matrix[sample_number][t, choices[x], x] for x in range(len(choices))])
             cost_matrix[sample_number][t,x_change_indices,0] = np.inf
             cost_matrix[sample_number][t,y_change_indices,1] = np.inf
             cost_matrix[sample_number][t,z_change_indices,2] = np.inf
@@ -201,13 +203,20 @@ class LinearAssignmentClassifier():
 
             # second_x_choice, second_y_choice, second_z_choice = second_choices[0], second_choices[1], second_choices[2]
 
-            first_score = sum([cost_matrix[sample_number][t, choices[x], x] for x in range(len(choices))])
 
             second_score = sum([cost_matrix[sample_number][t, second_choices[x], x] for x in range(len(second_choices))])
             s_similarity = 1 / first_score
             s_margin = 0 if first_score >= second_score else second_score / first_score
+
+            s_total = q[sample_number, t] * s_similarity * s_margin
+
+            for a in choices:
+                # print(a)
+                # print(s_total, s_similarity, s_margin, first_score)
+                # print(labels[gait_phase][a], len(s_acc))
+                s_acc[labels[gait_phase][a]] += s_total 
             
-            matching_scores.append(q[sample_number, t] * s_similarity * s_margin)
+            matching_scores.append(s_total)
 
             values, counts = np.unique([labels[gait_phase][x_choice], labels[gait_phase][y_choice], labels[gait_phase][z_choice]], return_counts=True)
             overall_solutions.append(values[counts.argmax()])
@@ -216,7 +225,11 @@ class LinearAssignmentClassifier():
             # TODO: S_margin: second_choice / first_choice if first_choice < second_choice, 0 otherwise
             # TODO: matching_score[t] = quality * s_similarity * s_margin
         # TODO: max(matching_score)
-        return overall_solutions[np.argmax(matching_scores)]
+        # values, counts = np.unique(s_acc, return_counts=True)
+        # print(s_acc)
+        # quit()
+        return np.argmax(s_acc)
+        # return #overall_solutions[np.argmax(matching_scores)]
 
 
     def brute_algorithm(self, cost_matrix, labels, sample_number):
@@ -330,7 +343,7 @@ class LinearAssignmentClassifier():
 
 
 
-ds = NaiveKinectDataset(max_samples=50)
+ds = NaiveKinectDataset(max_samples=20)
 # print(ds.n_classes)
 # quit()
 classifier = LinearAssignmentClassifier(ds)

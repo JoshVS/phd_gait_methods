@@ -12,6 +12,7 @@ from tqdm import tqdm
 import matplotlib
 import matplotlib.pyplot as plt
 # matplotlib.use('TkAgg')
+np.seterr(all='raise')
 
 import matplotlib.animation as animation
 from celluloid import Camera
@@ -345,6 +346,23 @@ class NaiveKinectDataset:
         self.X = self.vid_skeletons
         self.translation_vector()
         self.scaling_vector()
+        # before_rotation = self.X.copy()
+        test_ankles = []
+        for i in range(len(self.X)):
+            test_ankles.append(self.ankle_distances(i))
+        # self.show_video(2, include_centroids=False, max_frames = 200)
+        self.rotation_vector(2)
+        # self.show_video(2, include_centroids=False, max_frames = 200, outfile="rotated.gif")
+        for i in range(len(self.X)):
+            curr_ank = self.ankle_distances(i)
+            test = [a - b for a, b in zip(curr_ank, test_ankles[i])]
+            test_bool = [a > 15 for a in test]
+            if sum(test_bool) > 0:
+                print("ERROR")
+                print(max(test))
+                quit()
+            # assert self.ankle_distances(i) == test_ankles[i]
+        # quit()
         self.X, self.y = self.get_individual_steps()
         self.n_classes = len(np.unique(self.y))
         self.interpolate_by_time()
@@ -527,9 +545,9 @@ class NaiveKinectDataset:
 
         
 
-    def show_video(self, i, include_centroids=False):
+    def show_video(self, i, include_centroids=False, max_frames=200, outfile = "plots.gif"):
         frames = []
-        loop = tqdm(range(len(self.X[i])))
+        loop = tqdm(range(len(self.X[i][:(-1 if len(self.X[i]) < max_frames else max_frames)])))
         ankles, l, r = self.ankle_distances(i, return_positions=True)
         peaks = self._find_peaks_for_video(i)[::2]
         step_count = 1
@@ -546,7 +564,7 @@ class NaiveKinectDataset:
                 step_count += 1
             curr_frame = []
             kps = self.X[i][a]
-            ax.legend([f"Step Count: {step_count}"])
+            ax.legend([f"Step Count: {step_count}"], loc='upper left')
             ankle_ax.plot(ankles[:a])
             if include_centroids:
                 
@@ -572,10 +590,23 @@ class NaiveKinectDataset:
                     lt[2]
                 ]
 
+                a1 = [ct[0] + 1, self.rmov[0] + 1]
+                a2 = [ct[1] + 1, self.rmov[1] + 1]
+                a3 = [ct[0] + 1, self.rtop[0] + 1]
+                a4 = [ct[1] + 1, self.rtop[1] + 1]
+                a5 = [ct[0] + 1, self.rleft[0] + 1]
+                a6 = [ct[1] + 1, self.rleft[1] + 1]
+
                 
                 # curr_frame.append(ax.scatter(xc, yc))
                 # curr_frame.append(ax.plot(xc, yc, c='r'))
                 ax.scatter(xc, yc)
+                ax.scatter(a1, a2)
+                ax.plot(a1, a2, c='g')
+                ax.scatter(a3, a4)
+                ax.plot(a3, a4, c='g')
+                ax.scatter(a5, a6)
+                ax.plot(a5, a6, c='g')
                 ax.plot(xc, yc, c='r')
 
             x = kps[0::3]
@@ -625,9 +656,9 @@ class NaiveKinectDataset:
         # fig.savefig("3d.png")
         print("Rendering Video")
         # ani = animation.ArtistAnimation(fig, frames, interval=50)
-        animation = camera.animate()
+        animation = camera.animate() 
         print("Writing Video")
-        animation.save("plots.gif", writer='imagemagick', progress_callback=cell_callback_factory(len(self.X[i])))
+        animation.save(outfile, writer='imagemagick', progress_callback=cell_callback_factory(len(self.X[i][:(-1 if len(self.X[i]) < max_frames else max_frames)])))
         # ani.save('movie.mp4')
 
 
@@ -683,7 +714,9 @@ class NaiveKinectDataset:
         return np.array([(x + y) / 2 for (x, y) in zip(uc, lc)]), uc, lc
 
     def rotation_vector(self, tm):
-        for i in range(len(self.X)):
+        print("Creating Rotation Matrix")
+        loop = tqdm(range(len(self.X)))
+        for i in loop:
             
             centroids = []
             for j in range(len(self.X[i])):                
@@ -691,30 +724,67 @@ class NaiveKinectDataset:
 
                 ct, ut, lt = centroids[-1]
                 if j > tm:
-                    ct_prev, _,_ = centroids[-1 - tm]
+                    ct_prev, _,_ = centroids[j - tm]
                     self.X[i][j] = self._rotation_vector(self.X[i][j], self.X[i][j - tm], ct, ut, lt, ct_prev)
 
     def _rotation_vector(self, X, Xp, ct, ut, lt, ct_prev):
         d = np.sqrt(sum([(a - b)**2 for a, b in zip(ct, ct_prev)]))
-        rmov = [(a - b) / d for a, b in zip(ct, ct_prev)]
+        # try:
+        # rmov = []
+        # for a, b in zip(ct, ct_prev):
+        #     try:
+        #         rmov.append((a - b) / d)
+        #     except FloatingPointError:
+        #         print(a, b, (a - b), d)
+        #         quit()
 
-        dcen = np.sqrt(sum([(a - b)**2 for a, b in zip(ut, lt)]))
-        rtop = [(a - b) / dcen for a, b in zip(ut, lt)]
+        if d > 0:
+            rmov = [(a - b) / d for a, b in zip(ct, ct_prev)]
+            # except FloatingPointError:
+                # print(a, b, (a - b),)
+            self.rmov = rmov
+            x = np.abs(rmov[2] - ct[2])
+            r = np.sqrt((rmov[0] - ct[0]) ** 2 + (rmov[2] - ct[2]) ** 2)
+            ang = np.arcsin(x / r) if r > 0 else 0
 
-        cross_prod = np.cross(rtop, rmov)
-        dcross = np.sqrt(sum(a**2 for a in cross_prod))
-        rleft = [a / dcross for a in cross_prod]
+            R_inv = [
+                [np.cos(ang), 0, -np.sin(ang)],
+                [0, 1, 0],
+                [np.sin(ang), 0, np.cos(ang)]
+            ]
+        else:
+            R_inv = [
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1]
+            ]
 
-        R_mat = np.array([
-            rmov, 
-            rleft, 
-            rtop
-        ])
-        R_inv = np.linalg.inv(R_mat)
+
+        # dcen = np.sqrt(sum([(a - b)**2 for a, b in zip(ut, lt)]))
+        # rtop = [(a - b) / dcen for a, b in zip(ut, lt)]
+        # self.rtop = rtop
+
+        # cross_prod = np.cross(rtop, rmov)
+        # dcross = np.sqrt(sum(a**2 for a in cross_prod))
+        # rleft = [a / dcross for a in cross_prod]
+        # self.rleft = rleft
+
+        # R_mat = np.array([
+        #     rmov,
+        #     rtop,
+        #     rleft
+        # ])
+
+        # R_inv = R_mat # np.linalg.inv(R_mat)
+
+        # print(R_inv.shape)
+        # quit()
 
         ret_val = []
         for i in range(len(X) // 3):
             curr_vals = X[i * 3: i * 3 + 3]
+            # print(np.dot(R_inv, curr_vals).shape)
+            # quit()
             ret_val += list(np.dot(R_inv, curr_vals))
 
         return ret_val
