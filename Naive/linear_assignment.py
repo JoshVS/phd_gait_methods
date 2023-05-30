@@ -353,13 +353,7 @@ class LinearAssignmentClassifier():
         return np.array(set_of_matrices), y_selection, set_of_qs
 
 
-
-
-
-
-
-
-ds = NaiveKinectDataset(max_samples=50)
+ds = NaiveKinectDataset(max_samples=2)
 # print(ds.n_classes)
 # quit()
 classifier = LinearAssignmentClassifier(ds)

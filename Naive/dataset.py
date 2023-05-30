@@ -48,12 +48,39 @@ def dim(l, check_for_error=True):
 
 
 class NaiveKinectDataset:
-    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6):
+    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6, num_dims=2):
+        self.num_dims = num_dims
         self.directory = directory
         self.t_interp = t_interp
         self.skel_data, self.kp_indices = self._get_file_data(max_samples) # (n_people, n_files, n_lines, 3)
-        # print(dim(self.skel_data, check_for_error=False))
+        self.setup_information()
+        
+        self.X, self.labels = self.reshape_skeletons()
+
+        self.translation_vector()
+        self.scaling_vector()
+        # self.show_video(1)
+        if num_dims > 2:
+            self.rotation_vector(2)
+        # self.show_video(1)
         # quit()
+
+        self.X, self.y = self.get_individual_steps()
+        
+        self.n_classes = len(np.unique(self.y))
+
+        self.interpolate_by_time()
+
+        self.q = self.quality_matrices()
+
+        self.y_raw = self.y.copy()
+        self.y = self.to_one_hot()
+        self.X = self.get_position_vectors()
+        self.split_train_and_test()
+
+
+    def setup_information(self):
+        
         self.step_classifier = RandomForestClassifier()
         
         self.connections = [
@@ -78,39 +105,20 @@ class NaiveKinectDataset:
             ("Wrist-Right", "Hand-Right"),
         ]
         self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
-        self.vid_skeletons, self.labels = self.reshape_skeletons()
-        self.X = self.vid_skeletons
-        self.translation_vector()
-        self.scaling_vector()
-        # before_rotation = self.X.copy()
-        test_ankles = []
-        for i in range(len(self.X)):
-            test_ankles.append(self.ankle_distances(i))
-        # self.show_video(2, include_centroids=False, max_frames = 200)
-        self.rotation_vector(2)
-        # self.show_video(2, include_centroids=False, max_frames = 200, outfile="rotated.gif")
-        for i in range(len(self.X)):
-            curr_ank = self.ankle_distances(i)
-            test = [a - b for a, b in zip(curr_ank, test_ankles[i])]
-            test_bool = [a > 15 for a in test]
-            if sum(test_bool) > 0:
-                print("ERROR")
-                print(max(test))
-                quit()
-            # assert self.ankle_distances(i) == test_ankles[i]
-        # quit()
-        self.X, self.y = self.get_individual_steps()
-        # print(dim(self.X, check_for_error=False))
-        # quit()
-        # self.train_classifier(self.X)
-        self.n_classes = len(np.unique(self.y))
-        self.interpolate_by_time()
-        self.q = self.quality_matrices()
-        self.adjust_for_quality()
-        self.y_raw = self.y.copy()
-        self.y = self.to_one_hot()
-        self.X = self.get_position_vectors()
-        self.split_train_and_test()
+
+        self.upper_torso = [
+            "Head",
+            "Shoulder-Center",
+            "Shoulder-Right",
+            "Shoulder-Left"        
+        ]
+
+        self.lower_torso = [
+            "Spine",
+            "Hip-centro",
+            "Hip-Right",
+            "Hip-Left"
+        ]
 
 
     def train_classifier(self, X):
@@ -157,7 +165,7 @@ class NaiveKinectDataset:
             vid_qualities = []
             for j in range(self.X.shape[1]):
                 def get_indices(ind_str):
-                    return self.X[i, j, 3 * self.kp_indices[ind_str]:3 * self.kp_indices[ind_str] + 3]
+                    return self.X[i, j, self.num_dims * self.kp_indices[ind_str]:self.num_dims * self.kp_indices[ind_str] + self.num_dims]
                 
                 left_arm = get_indices("Elbow-Left")
                 right_arm = get_indices("Elbow-Right")
@@ -190,19 +198,19 @@ class NaiveKinectDataset:
                 ct = self.get_centroid(self.X[i,j,:])[0]
                 j_v = []
                 for jo in joints:
-                    j_coords = self.kp_indices[jo] * 3
-                    curr_j = list(self.X[i,j,j_coords:j_coords + 3])
+                    j_coords = self.kp_indices[jo] * self.num_dims
+                    curr_j = list(self.X[i,j,j_coords:j_coords + self.num_dims])
                     distances = [(a - b) for (a, b) in zip(curr_j, ct)]
                     # print(type(distances))
                     # print(type(ct))
                     # quit()
                     j_v.extend(list(distances))
                 for jo1, jo2 in subset_joints:
-                    j_coords1 = self.kp_indices[jo1] * 3
-                    j_coords2 = self.kp_indices[jo2] * 3
+                    j_coords1 = self.kp_indices[jo1] * self.num_dims
+                    j_coords2 = self.kp_indices[jo2] * self.num_dims
                     
-                    curr_j1 = list(self.X[i,j,j_coords1:j_coords1 + 3])
-                    curr_j2 = list(self.X[i,j,j_coords2:j_coords2 + 3])
+                    curr_j1 = list(self.X[i,j,j_coords1:j_coords1 + self.num_dims])
+                    curr_j2 = list(self.X[i,j,j_coords2:j_coords2 + self.num_dims])
                     
                     distances = [(a - b) for (a, b) in zip(curr_j2, curr_j1)]
                     j_v.extend(list(distances))
@@ -380,9 +388,9 @@ class NaiveKinectDataset:
                 ax.plot(a5, a6, c='g')
                 ax.plot(xc, yc, c='r')
 
-            x = kps[0::3]
-            y = kps[1::3]
-            z = kps[2::3]
+            x = kps[0::self.num_dims]
+            y = kps[1::self.num_dims]
+            z = kps[2::self.num_dims]
 
             xline = []
             yline = []
@@ -434,18 +442,18 @@ class NaiveKinectDataset:
 
 
     def ankle_distances(self, i, return_positions=False):
-        lankle = self.kp_indices['Ankle-Left'] * 3
-        rankle = self.kp_indices['Ankle-Right'] * 3
+        lankle = self.kp_indices['Ankle-Left'] * self.num_dims
+        rankle = self.kp_indices['Ankle-Right'] * self.num_dims
         ankle_dist = []
         left = []
         right = []
         for j in range(len(self.X[i])):
-            ankle1 = self.X[i][j][lankle: lankle + 3]
-            ankle2 = self.X[i][j][rankle: rankle + 3]
+            ankle1 = self.X[i][j][lankle: lankle + self.num_dims]
+            ankle2 = self.X[i][j][rankle: rankle + self.num_dims]
             d = np.sqrt(sum([(a - b)**2 for a, b in zip(ankle1,ankle2)]))
             ankle_dist.append(d)
-            left.append(ankle1[2])
-            right.append(ankle2[2])
+            left.append(ankle1[-1])
+            right.append(ankle2[-1])
         if return_positions:
             return ankle_dist, left, right
 
@@ -469,18 +477,17 @@ class NaiveKinectDataset:
         
     def get_centroid(self, X):
         # Step 1: Get upper Centroid and Lower Centroid
-        upper_limbs = X[:12]
-        uc = [
-            sum(upper_limbs[0::3]) / 4,
-            sum(upper_limbs[1::3]) / 4,
-            sum(upper_limbs[2::3]) / 4
-        ]
-        lower_limbs = X[11 * 3:11 * 3 +12]
-        lc = [
-            sum(lower_limbs[0::3]) / 4,
-            sum(lower_limbs[1::3]) / 4,
-            sum(lower_limbs[2::3]) / 4
-        ]
+        upper_limbs = []
+        for u in self.upper_torso:
+            start_ind = self.num_dims * self.kp_indices[u]
+            upper_limbs.extend(X[start_ind: start_ind + self.num_dims])
+        uc = [sum(upper_limbs[x::self.num_dims]) / len(self.upper_torso) for x in range(self.num_dims)]
+
+        lower_limbs = []
+        for l in self.lower_torso:
+            start_ind = self.num_dims * self.kp_indices[l]
+            lower_limbs.extend(X[start_ind: start_ind + self.num_dims])
+        lc = [sum(lower_limbs[x::self.num_dims]) / len(self.lower_torso) for x in range(self.num_dims)]
 
         return np.array([(x + y) / 2 for (x, y) in zip(uc, lc)]), uc, lc
 
@@ -514,7 +521,7 @@ class NaiveKinectDataset:
             # except FloatingPointError:
                 # print(a, b, (a - b),)
             self.rmov = rmov
-            x = np.abs(rmov[2] - ct[2])
+            x = np.abs(rmov[0] - ct[0])
             r = np.sqrt((rmov[0] - ct[0]) ** 2 + (rmov[2] - ct[2]) ** 2)
             ang = np.arcsin(x / r) if r > 0 else 0
 
@@ -552,8 +559,8 @@ class NaiveKinectDataset:
         # quit()
 
         ret_val = []
-        for i in range(len(X) // 3):
-            curr_vals = X[i * 3: i * 3 + 3]
+        for i in range(len(X) // self.num_dims):
+            curr_vals = X[i * self.num_dims: i * self.num_dims + self.num_dims]
             # print(np.dot(R_inv, curr_vals).shape)
             # quit()
             ret_val += list(np.dot(R_inv, curr_vals))
@@ -573,9 +580,8 @@ class NaiveKinectDataset:
     def _translation_vector(self, X, ct):        
         # Step 2: Translation Vector
         pt = ct.T
-        X[0::3] -= pt[0]
-        X[1::3] -= pt[1]
-        X[2::3] -= pt[2]
+        for i in range(self.num_dims):
+            X[i::self.num_dims] -= pt[i]
 
         return X
 
@@ -705,164 +711,3 @@ class NaiveKinectDataset:
                     print(len(reshaped_skel[-1][-1]))
                     quit()
         return reshaped_skel, labels
-
-
-
-    def normalize_skeletons(self):
-        norm_skel = []
-        for vid in self.vid_skeletons:
-            vid_skel = []
-            for frame in vid:
-                point1 = frame[np.argmax([f[1] for f in frame])]
-                point2 = frame[np.argmin([f[1] for f in frame])]
-                norm_dist = dist(point1, point2)
-                norm_kp = []
-                for kp in frame:
-                    x = 0 if norm_dist == 0 else kp[0] / norm_dist
-                    y = 0 if norm_dist == 0 else kp[1] / norm_dist
-                    norm_kp.append([x, y])
-                vid_skel.append(norm_kp)
-            norm_skel.append(vid_skel)
-        return norm_skel
-
-    def show_person(self, p=0, f=0):
-        
-        person = self.skel_data[p][f] # (n_lines, 3)
-        assert person[0][0] == 'Head'
-        person_skeleton = [person[0][:]]
-        kp_dict = {"Head": person[0][1:]}
-        for l in person[1:]: # l = (3,)
-            if l[0] == 'Head':
-                break
-            person_skeleton.append(l[:])
-            kp_dict[l[0]] = l[1:]
-
-
-        plt.figure()
-        plt.scatter([p[1] for p in person_skeleton], [p[2] for p in person_skeleton])
-        for p in person_skeleton:
-            plt.text(p[1], p[2], p[0])
-        for from_val, to_val in self.connections:
-            plt.plot(
-                [kp_dict[from_val][0], kp_dict[to_val][0]],
-                [kp_dict[from_val][1], kp_dict[to_val][1]])
-
-        
-        
-
-        plt.savefig('output.png')
-        plt.close()
-
-    def filter_peaks(self, peaks, threshold=5):
-        prev_peak = 0
-        new_peaks = []
-        for p in peaks:
-            if p - prev_peak > threshold:
-                new_peaks.append(p)
-            prev_peak = p
-        return new_peaks
-
-    def get_vid_peaks(self, norm_skel_vid):
-        distances = []
-        for i, kp in enumerate(norm_skel_vid):
-            ankle1 = kp[self.kp_indices["Ankle-Left"]]
-            ankle2 = kp[self.kp_indices["Ankle-Right"]]
-            distances.append(dist(ankle1, ankle2))
-        filtered_distances = savgol_filter(distances, 9, 3)
-        peaks = find_peaks(filtered_distances)[0]
-        peaks = self.filter_peaks(peaks)
-        return peaks, [filtered_distances[x] for x in peaks], filtered_distances
-
-    def get_peaks(self, show_peaks=None):
-        vid_peaks = []
-        for i, v in enumerate(self.norm_skeletons):
-            p, f, d = self.get_vid_peaks(v)
-            if i == show_peaks:
-                plt.figure()
-                plt.plot(d)
-                plt.scatter(p, f)
-                plt.savefig("peaks.png")
-                plt.close()
-            vid_peaks.append(p)
-        return vid_peaks
-
-    def get_gait_cycles(self):
-        """
-        Gait cycles happen every second time ankle distances peak
-        """
-        peaks = self.get_peaks()
-        g_arr = []
-        for p in peaks:
-            g_arr.append(p[::2])
-        return g_arr
-
-    def show_gait_cycle(self, vid_seq):
-        peaks, peak_vals, distances = self.get_peaks(vid_seq)
-        plt.plot(distances)
-        plt.scatter(peaks, peak_vals)
-        plt.savefig("output.png")
-        plt.close()
-
-    def compress_gait_phases(self):
-        ret_val = []
-        label_ret = []
-        for sample, label in zip(self.gait_phases, self.labels):
-            ret_val.extend(sample)
-            label_ret.extend([label] * len(sample))
-        self.labels = label_ret
-        self.gait_phases = ret_val
-
-
-    def get_gait_phases(self):
-        gait_phases = [
-            (0, 10),
-            (10, 30),
-            (30, 50),
-            (50, 60),
-            (60, 73),
-            (73, 87),
-            (87, 100)
-        ]
-        final_gait_features = []
-        for i, v in enumerate(self.gait_cycles):
-            vid_g_f = []
-            if len(v) == 0:
-                self.labels.pop(i)
-                continue
-            prev_g = v[0]
-            for g in v[1:]:
-                len_gait = g - prev_g
-                curr_gp = []
-                for gp in gait_phases:
-                    start, stop = gp
-                    start = prev_g + int(start / 100 * len_gait)
-                    stop = prev_g + int(stop / 100 * len_gait)
-                    curr_f = []
-                    for f in range(5):
-                        curr_vid = self.vid_features[i]
-                        curr_frames = curr_vid[start:stop]
-                        tmp = None
-                        for fr in curr_frames:
-                            tmp = fr[f] if tmp is None else [x + y for x, y in zip(fr[f], tmp)]
-                        tmp = np.divide(tmp, stop - start)
-                        curr_f.extend(tmp)
-                    
-                    curr_gp.append(curr_f)
-                vid_g_f.append(curr_gp)
-                prev_g = g
-            final_gait_features.append(vid_g_f)
-        return final_gait_features
-
-    def show_gait_cycle(self, vid_seq=None):
-        if vid_seq is None:
-            vid_seq = self.vid_skeletons[0]
-        self.get_peaks(1)
-
-    def one_hot_labels(self):
-        un_labels = list(np.unique(self.labels))
-        self.n_classes = len(un_labels)
-        onehot = np.zeros((len(self.labels), len(un_labels)))
-        for i, l in enumerate(self.labels):
-            l_ind = un_labels.index(l)
-            onehot[i, l_ind] = 1
-        return onehot
