@@ -48,7 +48,7 @@ def dim(l, check_for_error=True):
 
 
 class NaiveKinectDataset:
-    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6, num_dims=2):
+    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6, num_dims=3):
         self.num_dims = num_dims
         self.directory = directory
         self.t_interp = t_interp

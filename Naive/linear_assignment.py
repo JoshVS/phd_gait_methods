@@ -19,14 +19,15 @@ def manhattan_distance(a, b):
     return d
 
 class LinearAssignmentClassifier():
-    def __init__(self, dataset):
+    def __init__(self, dataset, num_dims=3):
+        self.num_dims = num_dims
         self.dataset = dataset
         self.X = dataset.X_train
         
         self.y = dataset.y_train
         self.q = dataset.q_train
 
-        self.n_features = dataset.X_train.shape[-1] // 3
+        self.n_features = dataset.X_train.shape[-1] // num_dims
         self.n_timesteps = dataset.X_train.shape[1]
         
         self.y = self.remove_one_hot(self.y)
@@ -191,27 +192,23 @@ class LinearAssignmentClassifier():
             columns, rows = hungarian_algorithm_method(cost_matrix[sample_number][t,:,:])
             # print(pos)
             # quit()
-            choices = [None, None, None]
+            choices = [None] * self.num_dims
             for c, r in zip(columns, rows):
                 choices[r] = c
-            x_choice, y_choice, z_choice = choices[0], choices[1], choices[2]
             # print([labels[gait_phase][x_choice], labels[gait_phase][y_choice], labels[gait_phase][z_choice]])
             # print(np.where(np.array(labels[gait_phase]) == labels[gait_phase][x_choice]))
             # print(cost_matrix[sample_number][t,...].shape)
             # quit()
-            x_change_indices = np.where(np.array(labels[gait_phase]) == labels[gait_phase][x_choice])[0]
-            y_change_indices = np.where(np.array(labels[gait_phase]) == labels[gait_phase][y_choice])[0]
-            z_change_indices = np.where(np.array(labels[gait_phase]) == labels[gait_phase][z_choice])[0]
+            change_indices = [np.where(np.array(labels[gait_phase]) == labels[gait_phase][a])[0] for a in choices]
 
             first_score = sum([cost_matrix[sample_number][t, choices[x], x] for x in range(len(choices))])
-            cost_matrix[sample_number][t,x_change_indices,0] = np.inf
-            cost_matrix[sample_number][t,y_change_indices,1] = np.inf
-            cost_matrix[sample_number][t,z_change_indices,2] = np.inf
+            for a, b in enumerate(choices):
+                cost_matrix[sample_number][t,b,a] = np.inf
 
             
             columns, rows = hungarian_algorithm_method(cost_matrix[sample_number][t,:,:])
             
-            second_choices = [None, None, None]
+            second_choices = [None] * self.num_dims
             for c, r in zip(columns, rows):
                 second_choices[r] = c
 
@@ -234,7 +231,7 @@ class LinearAssignmentClassifier():
             
             matching_scores.append(s_total)
 
-            values, counts = np.unique([labels[gait_phase][x_choice], labels[gait_phase][y_choice], labels[gait_phase][z_choice]], return_counts=True)
+            values, counts = np.unique([labels[gait_phase][a] for a in choices], return_counts=True)
             overall_solutions.append(values[counts.argmax()])
             # TODO: s_similarity: 1 / column
             # TODO: Second Choice: Remove all choices for current class
@@ -290,11 +287,11 @@ class LinearAssignmentClassifier():
             curr_s = X[i]
             cost_matrix_for_this_test_sample = [] # Should be shape (n_timesteps, n_cols, 3)
             
-            to_add = curr_s.reshape(-1, curr_s.shape[-1]//3, 3)
+            to_add = curr_s.reshape(-1, curr_s.shape[-1]//self.num_dims, self.num_dims)
     
             for t in range(to_add.shape[0]): # Per timestep                
                 cost_matrix_for_this_timestamp = []
-                cost_matrix_for_this_timestamp = np.array([np.abs(curr_s[t, x::3] - self.X[curr_cycle][:, :, x].T).astype(np.float64).sum(axis=1) for x in range(3)]).T
+                cost_matrix_for_this_timestamp = np.array([np.abs(curr_s[t, x::self.num_dims] - self.X[curr_cycle][:, :, x].T).astype(np.float64).sum(axis=1) for x in range(self.num_dims)]).T
                 
                 cost_matrix_for_this_test_sample.append(np.array(cost_matrix_for_this_timestamp))
             cost_matrices.append(np.array(cost_matrix_for_this_test_sample))
@@ -342,8 +339,8 @@ class LinearAssignmentClassifier():
             else:
                 set_of_qs = np.concatenate((set_of_qs, curr_q))
 
-            for f in range(X.shape[-1] // 3):
-                curr_feature_selection = curr_selection[:, 3 * f: 3 * f + 3]
+            for f in range(X.shape[-1] // self.num_dims):
+                curr_feature_selection = curr_selection[:, self.num_dims * f: self.num_dims * f + self.num_dims]
                 if len(set_of_matrices) <= f:
                     set_of_matrices.append(curr_feature_selection)
                 else:
@@ -353,7 +350,7 @@ class LinearAssignmentClassifier():
         return np.array(set_of_matrices), y_selection, set_of_qs
 
 
-ds = NaiveKinectDataset(max_samples=2)
+ds = NaiveKinectDataset(max_samples=2, num_dims=2)
 # print(ds.n_classes)
 # quit()
-classifier = LinearAssignmentClassifier(ds)
+classifier = LinearAssignmentClassifier(ds, num_dims=2)
