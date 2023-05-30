@@ -62,7 +62,7 @@ class NaiveKinectDataset:
         - self.upper_torso (list of strings defining upper torso)
         - self.lower_torso (list of strings defining lower torso)
     """
-    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6, num_dims=3):
+    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6, num_dims=3, generate_test_video=None):
         self.num_dims = num_dims
         self.directory = directory
         self.t_interp = t_interp
@@ -74,11 +74,14 @@ class NaiveKinectDataset:
 
         self.translation_vector()
         self.scaling_vector()
-        # self.show_video(1)
+        if generate_test_video is not None:
+            self.show_video(generate_test_video)
         if num_dims > 2:
             self.rotation_vector(2)
-        # self.show_video(1)
-        # quit()
+            if generate_test_video is not None:
+                self.show_video(generate_test_video)
+        if generate_test_video is not None:
+            quit()
 
         self.X, self.y = self.get_individual_steps()
         
@@ -374,15 +377,7 @@ class NaiveKinectDataset:
                     ut[1],
                     lt[1]
                 ]
-                
-
-
-                zc = [
-                    ct[2],
-                    ut[2],
-                    lt[2]
-                ]
-
+              
                 a1 = [ct[0] + 1, self.rmov[0] + 1]
                 a2 = [ct[1] + 1, self.rmov[1] + 1]
                 a3 = [ct[0] + 1, self.rtop[0] + 1]
@@ -390,9 +385,6 @@ class NaiveKinectDataset:
                 a5 = [ct[0] + 1, self.rleft[0] + 1]
                 a6 = [ct[1] + 1, self.rleft[1] + 1]
 
-                
-                # curr_frame.append(ax.scatter(xc, yc))
-                # curr_frame.append(ax.plot(xc, yc, c='r'))
                 ax.scatter(xc, yc)
                 ax.scatter(a1, a2)
                 ax.plot(a1, a2, c='g')
@@ -402,48 +394,27 @@ class NaiveKinectDataset:
                 ax.plot(a5, a6, c='g')
                 ax.plot(xc, yc, c='r')
 
-            x = kps[0::self.num_dims]
-            y = kps[1::self.num_dims]
-            z = kps[2::self.num_dims]
+            coords = [kps[a::self.num_dims] for a in range(self.num_dims)]
 
-            xline = []
-            yline = []
-            zline = []
 
-            for c in self.connections[:]:
-                c1, c2 = c
-                x1 = x[self.kp_indices[c1]]
-                x2 = x[self.kp_indices[c2]]
-                
-                y1 = y[self.kp_indices[c1]]
-                y2 = y[self.kp_indices[c2]]
-                
-                z1 = z[self.kp_indices[c1]]
-                z2 = z[self.kp_indices[c2]]
+            for c in self.connections:
+                lines = [[]] * len(coords)
 
-                xline.append(x1)
-                xline.append(x2)
+                for a, co in enumerate(coords):
+                    c1, c2 = c
+                    p1, p2 = co[self.kp_indices[c1]], co[self.kp_indices[c1]]
 
-                
-                yline.append(y1)
-                yline.append(y2)
-
-                
-                zline.append(z1)
-                zline.append(z2)
+                    lines[a].append(p1)
+                    lines[a].append(p2)
 
                 
                 # curr_frame.append(ax.plot(xline, yline, c='b'))
-                ax.plot(xline, yline, c='b')
-                
-                xline = []
-                yline = []
-                zline = []
+                ax.plot(*lines[:2], c='b')
 
             
             # curr_frame.append(ax.scatter(x, y))
             # frames.append([ax.scatter(x,y)])
-            ax.scatter(x,y)
+            ax.scatter(*lines[:2])
             camera.snap()
             loop.set_postfix()
         # fig.savefig("3d.png")
