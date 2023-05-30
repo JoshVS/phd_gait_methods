@@ -48,12 +48,27 @@ def dim(l, check_for_error=True):
 
 
 class NaiveKinectDataset:
+    """
+    Need to include:
+    - self._get_file_data(max_samples)
+        - Gets from self.directory
+        - Returns self.skel_data, self.kp_indices
+            self.skel_data: Shape (n_people, n_files, n_lines, num_dims)
+            self.kp_indices: String => int dictionary for keypoints
+
+    self.setup_information()
+        - self.step_classifier (optional)
+        - self.connections (list of string two-tuples)
+        - self.upper_torso (list of strings defining upper torso)
+        - self.lower_torso (list of strings defining lower torso)
+    """
     def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6, num_dims=3):
         self.num_dims = num_dims
         self.directory = directory
         self.t_interp = t_interp
         self.skel_data, self.kp_indices = self._get_file_data(max_samples) # (n_people, n_files, n_lines, 3)
         self.setup_information()
+        self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
         
         self.X, self.labels = self.reshape_skeletons()
 
@@ -104,7 +119,6 @@ class NaiveKinectDataset:
             ("Elbow-Right", "Wrist-Right"),
             ("Wrist-Right", "Hand-Right"),
         ]
-        self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
 
         self.upper_torso = [
             "Head",
