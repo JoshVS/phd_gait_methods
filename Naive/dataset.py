@@ -89,6 +89,7 @@ class NaiveKinectDataset:
         # self.show_video(2, include_centroids=False, max_frames = 200)
         self.rotation_vector(2)
         # self.show_video(2, include_centroids=False, max_frames = 200, outfile="rotated.gif")
+        # quit()
         for i in range(len(self.X)):
             curr_ank = self.ankle_distances(i)
             test = [a - b for a, b in zip(curr_ank, test_ankles[i])]
@@ -495,10 +496,11 @@ class NaiveKinectDataset:
 
                 ct, ut, lt = centroids[-1]
                 if j > tm:
+                    ang = 0
                     ct_prev, _,_ = centroids[j - tm]
-                    self.X[i][j] = self._rotation_vector(self.X[i][j], self.X[i][j - tm], ct, ut, lt, ct_prev)
+                    self.X[i][j], ang = self._rotation_vector(self.X[i][j], self.X[i][j - tm], ct, ut, lt, ct_prev, ang)
 
-    def _rotation_vector(self, X, Xp, ct, ut, lt, ct_prev):
+    def _rotation_vector(self, X, Xp, ct, ut, lt, ct_prev, def_ang):
         d = np.sqrt(sum([(a - b)**2 for a, b in zip(ct, ct_prev)]))
         # try:
         # rmov = []
@@ -508,7 +510,6 @@ class NaiveKinectDataset:
         #     except FloatingPointError:
         #         print(a, b, (a - b), d)
         #         quit()
-
         if d > 0:
             rmov = [(a - b) / d for a, b in zip(ct, ct_prev)]
             # except FloatingPointError:
@@ -517,19 +518,14 @@ class NaiveKinectDataset:
             x = np.abs(rmov[2] - ct[2])
             r = np.sqrt((rmov[0] - ct[0]) ** 2 + (rmov[2] - ct[2]) ** 2)
             ang = np.arcsin(x / r) if r > 0 else 0
-
-            R_inv = [
-                [np.cos(ang), 0, -np.sin(ang)],
-                [0, 1, 0],
-                [np.sin(ang), 0, np.cos(ang)]
-            ]
         else:
-            R_inv = [
-                [1, 0, 0],
-                [0, 1, 0],
-                [0, 0, 1]
-            ]
+            ang = def_ang
 
+        R_inv = [
+            [np.cos(ang), 0, np.sin(ang)],
+            [0, 1, 0],
+            [-np.sin(ang), 0, np.cos(ang)]
+        ]
 
         # dcen = np.sqrt(sum([(a - b)**2 for a, b in zip(ut, lt)]))
         # rtop = [(a - b) / dcen for a, b in zip(ut, lt)]
@@ -558,7 +554,7 @@ class NaiveKinectDataset:
             # quit()
             ret_val += list(np.dot(R_inv, curr_vals))
 
-        return ret_val
+        return ret_val, ang
 
 
         # cross_prod = np.cross(rtop, rmov)
