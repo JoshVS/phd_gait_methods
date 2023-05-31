@@ -14,7 +14,7 @@ logs/
 
 # C extensions
 *.so
-
+*.avi
 *.pdf
 *.gif
 
