@@ -64,6 +64,15 @@ class NaiveKinectDataset(GenericGaitDataset):
             "Hip-Right",
             "Hip-Left"
         ]
+        self.headpoint = "Head"
+        self.left_elbow = "Elbow-Left"
+        self.right_elbow = "Elbow-Right"
+        self.left_knee = "Knee-Left"
+        self.right_knee = "Knee-Right"
+        self.right_wrist = "Wrist-Right"
+        self.left_wrist = "Wrist-Left"
+        self.left_ankle = "Ankle-Left"
+        self.right_ankle = "Ankle-Right"
 
             
     def _get_file_data(self, max_samples):
@@ -106,7 +115,10 @@ def get_kp_from_file(filename, kp_dict):
         print(f"Error opening file {filename}")
         quit()
     frames = []
-    while cap.isOpened():
+    
+    length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    loop = tqdm(range(length))
+    for i in loop:
         ret, frame = cap.read()
         if not ret:
             break
@@ -119,11 +131,9 @@ def get_kp_from_file(filename, kp_dict):
         if lm.pose_landmarks is not None:
             for k in kp_dict.keys():
                 v = kp_dict[k]
-                curr_frame.append(k)
+                curr_frame.append([k, lm.pose_landmarks.landmark[v].x, lm.pose_landmarks.landmark[v].y])
                 # print(dir(lm.pose_landmarks))
                 # quit()
-                curr_frame.append(lm.pose_landmarks.landmark[v].x)
-                curr_frame.append(lm.pose_landmarks.landmark[v].y)
 
         frames.append(curr_frame)
     return frames
@@ -131,12 +141,64 @@ def get_kp_from_file(filename, kp_dict):
 
 
 
-            
+def read_from_cached_file(filename):
+    with open(filename, 'r') as in_file:
+        lines = in_file.read().split("\n")
+    file_data = []
+    curr_data = []
+    for line in lines:
+        kp, x, y = line.split(";")
+        curr_data.append([kp, float(x), float(y)])
+    return curr_data
+    
+        
+
+
+
+def write_to_file(filename, kps):
+    lines = []
+    for kp in kps:
+        curr_line = []
+        for p in kp:
+            c = []
+            for i in p:
+                c.append(str(i))
+            curr_line.append(";".join(c))
+        lines.extend(curr_line)
+    with open(filename, "w") as outfile:
+        outfile.write("\n".join(lines))
 
 
 class HARDetection(GenericGaitDataset):
     def __init__(self, directory='har_detection/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None):
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video)
+
+    def create_file_data(self, kp_dict):
+        if not os.path.exists("cached/"):
+            os.makedirs("cached")
+        subdirs = os.listdir(self.directory)
+        classes = []
+        videos = []
+        for i, d in enumerate(subdirs):
+            classes.append(d)
+            print(f"Processing class {d}  [{i + 1} / {len(subdirs)}]")
+            loop = os.listdir(self.directory + d)
+            if not os.path.exists(f"cached/{d}/"):
+                os.makedirs(f"cached/{d}/")
+            
+            for i, vid in enumerate(loop):
+                print(f"[ {i} / {len(loop)} ]")
+                if os.path.exists(f"cached/{d}/{vid}.txt"):
+                    print(f"File cached/{d}/{vid}.txt exists, using cached version")
+                    videos.append(read_from_cached_file(f"cached/{d}/{vid}.txt"))
+                else:
+                    print(f"File cached/{d}/{vid}.txt doesn't exist, creating")
+                    filename = os.path.join(self.directory, d, vid)
+                    c = get_kp_from_file(filename, kp_dict)
+                    videos.append(c)
+                    write_to_file(f"cached/{d}/{vid}.txt", c)
+        self.classes = classes
+        return videos, kp_dict
 
     def _get_file_data(self, max_samples):
         keypoints_arr = [
@@ -177,20 +239,21 @@ class HARDetection(GenericGaitDataset):
         kp_dict = {}
         for i, s in enumerate(keypoints_arr):
             kp_dict[s] = i
-        subdirs = os.listdir(self.directory)
-        classes = []
-        videos = []
-        for i, d in enumerate(subdirs):
-            classes.append(d)
-            print(f"Processing class {d}  [{i + 1} / {len(subdirs)}]")
-            loop = tqdm(os.listdir(self.directory + d))
-            for vid in loop:
-                filename = os.path.join(self.directory, d, vid)
-                videos.append(get_kp_from_file(filename, kp_dict))
-        self.classes = classes
-        return videos, kp_dict
+        return self.create_file_data(kp_dict)
+        
+        
 
-    def setup_information(self):        
+    def setup_information(self):     
+        self.headpoint = "nose"   
+        self.left_elbow = "left_elbow"
+        self.right_elbow = "right_elbow"
+        self.left_knee = "left_knee"
+        self.right_knee = "right_knee"
+        self.right_wrist = "right_wrist"
+        self.left_wrist = "left_wrist"
+        self.left_ankle = "left_ankle"
+        self.right_ankle = "right_ankle"
+
         self.step_classifier = RandomForestClassifier()        
         self.connections = [
             ("nose", "right_eye"),

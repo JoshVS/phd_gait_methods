@@ -154,10 +154,10 @@ class GenericGaitDataset:
                 def get_indices(ind_str):
                     return self.X[i, j, self.num_dims * self.kp_indices[ind_str]:self.num_dims * self.kp_indices[ind_str] + self.num_dims]
                 
-                left_arm = get_indices("Elbow-Left")
-                right_arm = get_indices("Elbow-Right")
-                left_leg = get_indices("Knee-Left")
-                right_leg = get_indices("Knee-Right")
+                left_arm = get_indices(self.left_elbow)
+                right_arm = get_indices(self.right_elbow)
+                left_leg = get_indices(self.left_knee)
+                right_leg = get_indices(self.right_knee)
 
                 ct, _, _ = self.get_centroid(self.X[i,j,:])
                 qarm = min(dist(ct, left_arm) / dist(ct, right_arm), dist(ct, right_arm) / dist(ct, left_arm))
@@ -170,13 +170,13 @@ class GenericGaitDataset:
 
     def get_position_vectors(self):
         joints = [
-            "Elbow-Left", "Elbow-Right", "Knee-Left", "Knee-Right"
+            self.left_elbow, self.right_elbow, self.left_knee, self.right_knee
         ]
         subset_joints = [
-            ("Elbow-Left", "Wrist-Left"),
-            ("Elbow-Right", "Wrist-Right"),
-            ("Knee-Left", "Ankle-Left"),
-            ("Knee-Right", "Ankle-Right")
+            (self.left_elbow, self.left_wrist),
+            (self.right_elbow, self.right_wrist),
+            (self.left_knee, self.left_ankle),
+            (self.right_knee, self.right_ankle)
         ]
         new_X = []
         for i in range(self.X.shape[0]):
@@ -397,8 +397,8 @@ class GenericGaitDataset:
 
 
     def ankle_distances(self, i, return_positions=False):
-        lankle = self.kp_indices['Ankle-Left'] * self.num_dims
-        rankle = self.kp_indices['Ankle-Right'] * self.num_dims
+        lankle = self.kp_indices[self.left_ankle] * self.num_dims
+        rankle = self.kp_indices[self.right_ankle] * self.num_dims
         ankle_dist = []
         left = []
         right = []
@@ -626,7 +626,7 @@ class GenericGaitDataset:
                 reshaped_skel.append([])
                 labels.append(i)
                 for l in f:
-                    if l[0] == "Head":
+                    if l[0] == self.headpoint:
                         reshaped_skel[-1].append([])
                     reshaped_skel[-1][-1] += l[1:]
                 if len(reshaped_skel[-1][-1]) % 20 != 0:
