@@ -104,9 +104,8 @@ class GenericGaitDataset:
         if self.generate_test_video is not None:
             quit()
 
-        if individual_steps:
-            self.X, self.y = self.get_individual_steps()
-            self.interpolate_by_time()
+        self.X, self.y = self.get_individual_steps()
+        self.interpolate_by_time()
         
         self.n_classes = len(np.unique(self.y))
 
@@ -282,6 +281,14 @@ class GenericGaitDataset:
                     if len(vid_steps[j * chunk_size: j * chunk_size + chunk_size]) == 0:
                         quit()
                     ret_val.append(vid_steps[j * chunk_size: j * chunk_size + chunk_size])
+                    tmp = []
+                    for r in ret_val[-1]:
+                        negated = r
+                        for o in range(len(negated) // self.num_dims):
+                            negated[2 * o] *= -1
+                        tmp.append(negated)
+                    ret_val.append(tmp)
+                    ret_labels.append(self.labels[i])
                     ret_labels.append(self.labels[i])
             # print(np.array(ret_val).shape)
             for r in ret_val:
@@ -387,17 +394,18 @@ class GenericGaitDataset:
             for c in self.connections:
                 
 
-                for a, co in enumerate(coords):
-                    c1, c2 = c
-                    p1, p2 = co[self.kp_indices[c1]], co[self.kp_indices[c2]]
-                    # quit()
+                curr_points = [[a[self.kp_indices[con]] for con in c] for a in coords]
 
-                    lines[a].append(p1)
-                    lines[a].append(p2)
+                ax.plot(*curr_points)
 
                 
                 # curr_frame.append(ax.plot(xline, yline, c='b'))
-                ax.plot(*lines[:2], c='b')
+            # print(*lines)
+            # quit()
+            # ax.plot(lines[0], lines[1])
+            # for k in range(len(lines[0])):
+
+            #     ax.plot([lines[0][k]], , c='b')
 
             
             # curr_frame.append(ax.scatter(x, y))

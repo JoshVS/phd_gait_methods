@@ -209,7 +209,7 @@ class LinearAssignmentClassifier():
 
             
 
-            s_total = q[sample_number, t] * s_similarity * s_margin
+            s_total = q[sample_number][t] * s_similarity * s_margin
 
             for a in choices:
                 # print(a)
