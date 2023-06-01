@@ -103,7 +103,7 @@ class LinearAssignmentClassifier():
             outfile.write(out_str)
         print(out_str)
 
-        sns.heatmap(cm, annot=(cm.shape[0] <= 5))
+        sns.heatmap(cm, annot=(cm.shape[0] <= 8), xticklabels=self.dataset.classes, yticklabels=self.dataset.classes)
         plt.xlabel("Predicted")
         plt.ylabel("True")
         plt.savefig("confusion_matrix.png")

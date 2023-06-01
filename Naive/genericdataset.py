@@ -73,7 +73,8 @@ class GenericGaitDataset:
         - self.upper_torso (list of strings defining upper torso)
         - self.lower_torso (list of strings defining lower torso)
     """
-    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=10000, num_dims=3, generate_test_video=None, extract_steps=True):
+    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=10000, num_dims=3, generate_test_video=None, extract_steps=True, num_segments=20):
+        self.num_segments = num_segments
         self.num_dims = num_dims
         self.directory = directory
         self.t_interp = t_interp
@@ -242,6 +243,7 @@ class GenericGaitDataset:
         for i in range(len(self.X)):
             curr_sample = self.X[i]
             x = np.arange(len(curr_sample))
+            # print(len(curr_sample), i, len(self.X))
             f = interp1d(x, curr_sample, axis=0)
             xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
             # print(xnew, len(curr_sample))
@@ -268,8 +270,23 @@ class GenericGaitDataset:
 
         if not self.extract_steps:
             for i in range(len(self.X)):
-                ret_labels.append(self.labels[i])
-            return self.X, np.array(ret_labels)
+                vid_steps = self.X[i]
+                chunk_size = len(vid_steps) // self.num_segments
+                if chunk_size < 2:
+                    continue
+                for j in range(self.num_segments):
+                    # print(len(self.X[i]), chunk_size, len(vid_steps[j * chunk_size: j * chunk_size + chunk_size]))
+                    if len(vid_steps[j * chunk_size: j * chunk_size + chunk_size]) == 0:
+                        quit()
+                    ret_val.append(vid_steps[j * chunk_size: j * chunk_size + chunk_size])
+                    ret_labels.append(self.labels[i])
+            # print(np.array(ret_val).shape)
+            for r in ret_val:
+                if len(r) == 0:
+                    print("WHOOPS")
+                # print(len(r))
+            # quit()
+            return ret_val, np.array(ret_labels)
         for i in range(len(self.X)):
             vid_peaks = peaks[i]
             vid_steps = self.X[i]
@@ -337,6 +354,8 @@ class GenericGaitDataset:
 
     def show_video(self, i, include_centroids=False, max_frames=200, outfile = "plots.gif"):
         frames = []
+        print()
+        print("Generating Video...")
         loop = tqdm(range(len(self.X[i][:(-1 if len(self.X[i]) < max_frames else max_frames)])))
         ankles, l, r = self.ankle_distances(i, return_positions=True)
         peaks = self._find_peaks_for_video(i)[::2]
@@ -348,7 +367,6 @@ class GenericGaitDataset:
         ax, ankle_ax = ax[0], ax[1]
         camera = Camera(fig)
         
-        print("Generating Video...")
         for a in loop:
             if peaks[(step_count - 1) % len(peaks)] < a < peaks[(step_count) % len(peaks)] :
                 step_count += 1
@@ -356,47 +374,20 @@ class GenericGaitDataset:
             kps = self.X[i][a]
             ax.legend([f"Step Count: {step_count}"], loc='upper left')
             ankle_ax.plot(ankles[:a])
-            if include_centroids:
-                
-                ct, ut, lt = self.get_centroid(kps)
-                xc = [
-                    ct[0],
-                    ut[0],
-                    lt[0]
-                ]
-
-                
-                yc = [
-                    ct[1],
-                    ut[1],
-                    lt[1]
-                ]
-              
-                a1 = [ct[0] + 1, self.rmov[0] + 1]
-                a2 = [ct[1] + 1, self.rmov[1] + 1]
-                a3 = [ct[0] + 1, self.rtop[0] + 1]
-                a4 = [ct[1] + 1, self.rtop[1] + 1]
-                a5 = [ct[0] + 1, self.rleft[0] + 1]
-                a6 = [ct[1] + 1, self.rleft[1] + 1]
-
-                ax.scatter(xc, yc)
-                ax.scatter(a1, a2)
-                ax.plot(a1, a2, c='g')
-                ax.scatter(a3, a4)
-                ax.plot(a3, a4, c='g')
-                ax.scatter(a5, a6)
-                ax.plot(a5, a6, c='g')
-                ax.plot(xc, yc, c='r')
+            
 
             coords = [kps[a::self.num_dims] for a in range(self.num_dims)]
+            
 
 
+            lines = [[]] * len(coords)
             for c in self.connections:
-                lines = [[]] * len(coords)
+                
 
                 for a, co in enumerate(coords):
                     c1, c2 = c
-                    p1, p2 = co[self.kp_indices[c1]], co[self.kp_indices[c1]]
+                    p1, p2 = co[self.kp_indices[c1]], co[self.kp_indices[c2]]
+                    # quit()
 
                     lines[a].append(p1)
                     lines[a].append(p2)
@@ -408,7 +399,10 @@ class GenericGaitDataset:
             
             # curr_frame.append(ax.scatter(x, y))
             # frames.append([ax.scatter(x,y)])
-            ax.scatter(*lines[:2])
+            # print(*lines[:2])
+            # quit()
+            # quit()
+            ax.scatter(*coords)
             camera.snap()
             loop.set_postfix()
         # fig.savefig("3d.png")
