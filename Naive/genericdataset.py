@@ -6,7 +6,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
 from scipy.interpolate import interp1d
 
-from scipy.signal import savgol_filter, find_peaks, argrelmax, argrelmin
+try:
+    from scipy.signal import savgol_filter, find_peaks, argrelmax, argrelmin
+except ValueError:
+    print(d)
+    quit()
 
 from tqdm import tqdm
 import matplotlib
@@ -278,7 +282,11 @@ class GenericGaitDataset:
 
     def _find_peaks_for_video(self, i):
         d = self.smooth_walk(self.ankle_distances(i))
-        filtered_distances = savgol_filter(d, 9, 3)
+        try:
+            filtered_distances = savgol_filter(d, 9, 3)
+        except ValueError:
+            print(d)
+            quit()
         max_peaks = argrelmax(filtered_distances)[0]
         min_peaks = argrelmin(filtered_distances)[0]
         # print(max_peaks)
@@ -629,7 +637,4 @@ class GenericGaitDataset:
                     if l[0] == self.headpoint:
                         reshaped_skel[-1].append([])
                     reshaped_skel[-1][-1] += l[1:]
-                if len(reshaped_skel[-1][-1]) % 20 != 0:
-                    print(len(reshaped_skel[-1][-1]))
-                    quit()
         return reshaped_skel, labels

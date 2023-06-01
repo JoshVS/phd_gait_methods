@@ -32,33 +32,18 @@ class LinearAssignmentClassifier():
         
         self.y = self.remove_one_hot(self.y)
         self.X, self.y, self.q = self.create_gallery(self.X, self.y, self.q) # (n_features//3, n_classes * n_samples * n_timesteps, 3)
-        # print(np.unique(self.y[0], return_counts=True)[1].min())
-        # print(self.X[0].shape)
-        # self.X, self.y, self.q = self.balance_classes(self.X, self.y, self.q)
-        # print(self.X[0].shape)
-        # quit()
-        # self.X = self.adjust_cost_for_quality(self.X)
-        # print(self.X[0].shape, self.q[0].shape)
-        # print(len(self.X), len(self.q))
-        # quit()
-        cm = self.create_cost_matrix(dataset.X_test)
-        cm = self.adjust_cost_for_quality(cm)
-        # print(self.q[0].shape)
-        y_test_new = self.remove_one_hot(dataset.y_test)
-        # print(dataset.X_test.shape, dataset.q_test.shape)
-        # quit()
-        gait_predictions = self.classify_gait(cm, dataset.q_test, hungarian=True)
         
-        y_pred = gait_predictions
-        # gait_predictions = self.classify_gait(cm)
-        # if gait_validation != gait_predictions:
-        #     print("Non-Matching Solutions. Hungarian Algorithm first, then Brute")
-        #     print(gait_validation)
-        #     print(gait_predictions)
-        #     quit()
-        # assert gait_predictions == gait_validation
-        # y_pred = self.classify_individual_steps(gait_predictions)
+        
+    def generate_test_set_results(self):
+        y_test_new = self.remove_one_hot(self.dataset.y_test)
+        y_pred = self.predict(self.dataset.X_test, self.dataset.q_test)
         self.report_metrics(y_test_new, y_pred)
+
+    def predict(self, X, q, use_hungarian=True):
+        cm = self.create_cost_matrix(X)
+        cm = self.adjust_cost_for_quality(cm)
+        return self.classify_gait(cm, q, hungarian=use_hungarian)
+
 
     def balance_classes(self, X, y, q):
         for i in range(len(X)):

@@ -144,11 +144,13 @@ def get_kp_from_file(filename, kp_dict):
 def read_from_cached_file(filename):
     with open(filename, 'r') as in_file:
         lines = in_file.read().split("\n")
-    file_data = []
     curr_data = []
     for line in lines:
+        if line == "": continue
         kp, x, y = line.split(";")
         curr_data.append([kp, float(x), float(y)])
+    if curr_data == []:
+        return None
     return curr_data
     
         
@@ -183,20 +185,22 @@ class HARDetection(GenericGaitDataset):
             classes.append(d)
             print(f"Processing class {d}  [{i + 1} / {len(subdirs)}]")
             loop = os.listdir(self.directory + d)
+            class_vids = []
             if not os.path.exists(f"cached/{d}/"):
                 os.makedirs(f"cached/{d}/")
-            
+            loop = tqdm(loop)
             for i, vid in enumerate(loop):
-                print(f"[ {i} / {len(loop)} ]")
                 if os.path.exists(f"cached/{d}/{vid}.txt"):
-                    print(f"File cached/{d}/{vid}.txt exists, using cached version")
-                    videos.append(read_from_cached_file(f"cached/{d}/{vid}.txt"))
+                    to_append = read_from_cached_file(f"cached/{d}/{vid}.txt")
+                    if to_append is not None:
+                        class_vids.append(to_append)
                 else:
                     print(f"File cached/{d}/{vid}.txt doesn't exist, creating")
                     filename = os.path.join(self.directory, d, vid)
                     c = get_kp_from_file(filename, kp_dict)
-                    videos.append(c)
+                    class_vids.append(c)
                     write_to_file(f"cached/{d}/{vid}.txt", c)
+            videos.append(class_vids)
         self.classes = classes
         return videos, kp_dict
 
