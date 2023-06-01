@@ -73,8 +73,9 @@ class GenericGaitDataset:
         - self.upper_torso (list of strings defining upper torso)
         - self.lower_torso (list of strings defining lower torso)
     """
-    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6, num_dims=3, generate_test_video=None):
+    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6, num_dims=3, generate_test_video=None, num_phases=4):
         self.num_dims = num_dims
+        self.num_phases = num_phases
         self.directory = directory
         self.t_interp = t_interp
         self.skel_data, self.kp_indices = self._get_file_data(max_samples) # (n_people, n_files, n_lines, 3)
@@ -118,7 +119,7 @@ class GenericGaitDataset:
         train_X_data = []
         train_y_data = []
         for i in loop:
-            labels = [x % 4 for x in range(len(X[i]))]
+            labels = [x % self.num_phases for x in range(len(X[i]))]
             train_y_data.extend(labels)
             train_X_data.extend(X[i])
         self.step_classifier.fit(train_X_data, train_y_data)

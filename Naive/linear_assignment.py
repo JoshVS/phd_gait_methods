@@ -19,7 +19,8 @@ def manhattan_distance(a, b):
     return d
 
 class LinearAssignmentClassifier():
-    def __init__(self, dataset, num_dims=3):
+    def __init__(self, dataset, num_dims=3, num_phases=4):
+        self.num_phases = num_phases
         self.num_dims = num_dims
         self.dataset = dataset
         self.X = dataset.X_train
@@ -72,7 +73,7 @@ class LinearAssignmentClassifier():
         for i in range(len(X)):
             for j in range(X[i].shape[0]):
                 for k in range(X[i].shape[2]):
-                    X[i][j,:, k] /= self.q[i%4]
+                    X[i][j,:, k] /= self.q[i%self.num_phases]
         # for i in range(len(X)):
         #     for j in range(X[i].shape[0]):
         #         for k in range(X[i].shape[2]):
@@ -147,9 +148,9 @@ class LinearAssignmentClassifier():
         for i in loop:
             if hungarian:
                 vote_vals.append(self.hungarian_algorithm(cm, self.y, i, q))
-                if len(vote_vals) == 4:
+                if len(vote_vals) == self.num_phases:
                     values, counts = np.unique(vote_vals, return_counts=True)
-                    # ret_vals.extend([values[counts.argmax()] ] * 4)
+                    # ret_vals.extend([values[counts.argmax()] ] * self.num_phases)
                     ret_vals.extend(vote_vals)
                     vote_vals = []
             else:
@@ -160,7 +161,7 @@ class LinearAssignmentClassifier():
         return ret_vals
 
     def hungarian_algorithm(self, cost_matrix, labels, sample_number, q):
-        gait_phase = sample_number % 4
+        gait_phase = sample_number % self.num_phases
         # Takes in cost matrix array of shape (n_samples, n_columns, 3)
         # Multiplies with quality matrix
         # Returns Y, which should be individual votes
@@ -231,7 +232,7 @@ class LinearAssignmentClassifier():
 
 
     def brute_algorithm(self, cost_matrix, labels, sample_number):
-        gait_phase = sample_number % 4
+        gait_phase = sample_number % self.num_phases
         # Takes in cost matrix array of shape (n_samples, n_columns, 3)
         # Multiplies with quality matrix
         # Returns Y, which should be individual votes
@@ -268,7 +269,7 @@ class LinearAssignmentClassifier():
         print("Creating cost matrix")
         loop = tqdm(range(X.shape[0]))
         for i in loop:
-            curr_cycle = i % 4
+            curr_cycle = i % self.num_phases
             curr_s = X[i]
             cost_matrix_for_this_test_sample = [] # Should be shape (n_timesteps, n_cols, 3)
             
@@ -295,7 +296,7 @@ class LinearAssignmentClassifier():
         x_vals = []
         y_vals = []
         q_vals = []
-        for i in range(4):
+        for i in range(self.num_phases):
             x_new, y_new, q_new = self._create_gallery(i, X, y, q)
             x_vals.append(x_new)
             y_vals.append(y_new)
