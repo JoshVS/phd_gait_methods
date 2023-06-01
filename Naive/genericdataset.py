@@ -35,7 +35,7 @@ def cell_callback_factory(num_frames):
 
 
 def _dim(l, check_for_error):
-    if type(l) != list:
+    if type(l) != list and type(l) != np.ndarray:
         return []
     else:
         if type(l[0]) == list and check_for_error:
@@ -45,7 +45,7 @@ def _dim(l, check_for_error):
                     raise ValueError("Array is sparse")
         return [len(l)] + _dim(l[0], check_for_error)
 
-def dim(l, check_for_error=True):
+def dim(l, check_for_error=False):
     return tuple(_dim(l, check_for_error))
 
 
@@ -73,7 +73,7 @@ class GenericGaitDataset:
         - self.upper_torso (list of strings defining upper torso)
         - self.lower_torso (list of strings defining lower torso)
     """
-    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6, num_dims=3, generate_test_video=None, num_phases=4):
+    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6, num_dims=3, generate_test_video=None, num_phases=4, individual_steps=True):
         self.num_dims = num_dims
         self.num_phases = num_phases
         self.directory = directory
@@ -83,6 +83,7 @@ class GenericGaitDataset:
         self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
         
         self.X, self.labels = self.reshape_skeletons()
+        self.y  = self.labels
 
         self.translation_vector()
         self.scaling_vector()
@@ -95,11 +96,12 @@ class GenericGaitDataset:
         if generate_test_video is not None:
             quit()
 
-        self.X, self.y = self.get_individual_steps()
+        if individual_steps:
+            self.X, self.y = self.get_individual_steps()
+            self.interpolate_by_time()
         
         self.n_classes = len(np.unique(self.y))
 
-        self.interpolate_by_time()
 
         self.q = self.quality_matrices()
 
@@ -153,23 +155,23 @@ class GenericGaitDataset:
         def dist(a, b):
             return np.sqrt(np.sum([(x - y)**2 for (x, y) in zip(a, b)]))
         qualities = []
-        for i in range(self.X.shape[0]):
+        for i in range(len(self.X)):
             vid_qualities = []
-            for j in range(self.X.shape[1]):
+            for j in range(len(self.X[i])):
                 def get_indices(ind_str):
-                    return self.X[i, j, self.num_dims * self.kp_indices[ind_str]:self.num_dims * self.kp_indices[ind_str] + self.num_dims]
+                    return np.array(self.X[i][j])[self.num_dims * self.kp_indices[ind_str]:self.num_dims * self.kp_indices[ind_str] + self.num_dims]
                 
                 left_arm = get_indices(self.left_elbow)
                 right_arm = get_indices(self.right_elbow)
                 left_leg = get_indices(self.left_knee)
                 right_leg = get_indices(self.right_knee)
 
-                ct, _, _ = self.get_centroid(self.X[i,j,:])
+                ct, _, _ = self.get_centroid(self.X[i][j])
                 qarm = min(dist(ct, left_arm) / dist(ct, right_arm), dist(ct, right_arm) / dist(ct, left_arm))
                 qleg = min(dist(ct, left_leg) / dist(ct, right_leg), dist(ct, right_leg) / dist(ct, left_leg))
                 vid_qualities.append(min(qleg, qarm))
             qualities.append(vid_qualities)
-        return np.array(qualities)
+        return qualities
 
 
 
@@ -184,14 +186,14 @@ class GenericGaitDataset:
             (self.right_knee, self.right_ankle)
         ]
         new_X = []
-        for i in range(self.X.shape[0]):
+        for i in range(len(self.X)):
             curr_person = []
-            for j in range(self.X.shape[1]):
-                ct = self.get_centroid(self.X[i,j,:])[0]
+            for j in range(len(self.X[i])):
+                ct = self.get_centroid(self.X[i][j])[0]
                 j_v = []
                 for jo in joints:
                     j_coords = self.kp_indices[jo] * self.num_dims
-                    curr_j = list(self.X[i,j,j_coords:j_coords + self.num_dims])
+                    curr_j = list(self.X[i][j][j_coords:j_coords + self.num_dims])
                     distances = [(a - b) for (a, b) in zip(curr_j, ct)]
                     # print(type(distances))
                     # print(type(ct))
@@ -201,8 +203,8 @@ class GenericGaitDataset:
                     j_coords1 = self.kp_indices[jo1] * self.num_dims
                     j_coords2 = self.kp_indices[jo2] * self.num_dims
                     
-                    curr_j1 = list(self.X[i,j,j_coords1:j_coords1 + self.num_dims])
-                    curr_j2 = list(self.X[i,j,j_coords2:j_coords2 + self.num_dims])
+                    curr_j1 = list(self.X[i][j][j_coords1:j_coords1 + self.num_dims])
+                    curr_j2 = list(self.X[i][j][j_coords2:j_coords2 + self.num_dims])
                     
                     distances = [(a - b) for (a, b) in zip(curr_j2, curr_j1)]
                     j_v.extend(list(distances))
@@ -213,7 +215,7 @@ class GenericGaitDataset:
             new_X.append(curr_person)
         # print(new_X[0][0][0])
         # quit()
-        return np.array(new_X, dtype=np.float32)
+        return new_X
 
 
     def split_train_and_test(self, split=0.1):
