@@ -1,5 +1,6 @@
 import numpy as np
 from dataset import NaiveKinectDataset
+from genericdataset import dim
 from naive_classifier import create_classifier, create_frame_level_classifier
 import wandb
 from tensorflow.keras.callbacks import Callback, EarlyStopping, ReduceLROnPlateau
@@ -31,12 +32,12 @@ class LinearAssignmentClassifier():
         self.n_features = dataset.X_train.shape[-1] // num_dims
         self.n_timesteps = dataset.X_train.shape[1]
         
-        self.y = self.remove_one_hot(self.y)
+        # self.y = self.remove_one_hot(self.y)
         self.X, self.y, self.q = self.create_gallery(self.X, self.y, self.q) # (n_features//3, n_classes * n_samples * n_timesteps, 3)
         
         
     def generate_test_set_results(self):
-        y_test_new = self.remove_one_hot(self.dataset.y_test)
+        y_test_new = self.dataset.y_test #self.remove_one_hot(self.dataset.y_test)
         y_pred = self.predict(self.dataset.X_test, self.dataset.q_test)
         self.report_metrics(y_test_new, y_pred)
 
@@ -334,9 +335,3 @@ class LinearAssignmentClassifier():
             y_selection += [i] * curr_selection.shape[0]
 
         return np.array(set_of_matrices), y_selection, set_of_qs
-
-
-ds = NaiveKinectDataset(max_samples=20, num_dims=2)
-# print(ds.n_classes)
-# quit()
-classifier = LinearAssignmentClassifier(ds, num_dims=2)

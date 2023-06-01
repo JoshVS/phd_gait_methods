@@ -45,7 +45,7 @@ def _dim(l, check_for_error):
                     raise ValueError("Array is sparse")
         return [len(l)] + _dim(l[0], check_for_error)
 
-def dim(l, check_for_error=True):
+def dim(l, check_for_error=False):
     return tuple(_dim(l, check_for_error))
 
 
@@ -73,12 +73,19 @@ class GenericGaitDataset:
         - self.upper_torso (list of strings defining upper torso)
         - self.lower_torso (list of strings defining lower torso)
     """
-    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=6, num_dims=3, generate_test_video=None, num_phases=4):
+    def __init__(self, directory="../KinectDataset/", max_samples=None, t_interp=10000, num_dims=3, generate_test_video=None, extract_steps=True):
         self.num_dims = num_dims
-        self.num_phases = num_phases
         self.directory = directory
         self.t_interp = t_interp
-        self.skel_data, self.kp_indices = self._get_file_data(max_samples) # (n_people, n_files, n_lines, 3)
+        self.extract_steps = extract_steps
+        self.max_samples = max_samples
+        # print(extract_steps, directory)
+        # quit()
+        self.max_samples = max_samples
+        self.generate_test_video = generate_test_video
+
+    def initialise_stuff(self):
+        self.skel_data, self.kp_indices = self._get_file_data(self.max_samples) # (n_people, n_files, n_lines, 3)
         self.setup_information()
         self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
         
@@ -86,13 +93,13 @@ class GenericGaitDataset:
 
         self.translation_vector()
         self.scaling_vector()
-        if generate_test_video is not None:
-            self.show_video(generate_test_video)
-        if num_dims > 2:
+        if self.generate_test_video is not None:
+            self.show_video(self.generate_test_video)
+        if self.num_dims > 2:
             self.rotation_vector(2)
-            if generate_test_video is not None:
-                self.show_video(generate_test_video)
-        if generate_test_video is not None:
+            if self.generate_test_video is not None:
+                self.show_video(self.generate_test_video)
+        if self.generate_test_video is not None:
             quit()
 
         self.X, self.y = self.get_individual_steps()
@@ -100,11 +107,14 @@ class GenericGaitDataset:
         self.n_classes = len(np.unique(self.y))
 
         self.interpolate_by_time()
+        
+        # print(self.X.shape)
+        # quit()
 
         self.q = self.quality_matrices()
 
         self.y_raw = self.y.copy()
-        self.y = self.to_one_hot()
+        # self.y = self.to_one_hot()
         self.X = self.get_position_vectors()
         self.split_train_and_test()
 
@@ -119,7 +129,7 @@ class GenericGaitDataset:
         train_X_data = []
         train_y_data = []
         for i in loop:
-            labels = [x % self.num_phases for x in range(len(X[i]))]
+            labels = [x % 4 for x in range(len(X[i]))]
             train_y_data.extend(labels)
             train_X_data.extend(X[i])
         self.step_classifier.fit(train_X_data, train_y_data)
@@ -255,6 +265,11 @@ class GenericGaitDataset:
         peaks = self.find_peaks()
         ret_val = []
         ret_labels = []
+
+        if not self.extract_steps:
+            for i in range(len(self.X)):
+                ret_labels.append(self.labels[i])
+            return self.X, np.array(ret_labels)
         for i in range(len(self.X)):
             vid_peaks = peaks[i]
             vid_steps = self.X[i]
@@ -266,7 +281,7 @@ class GenericGaitDataset:
                 ret_val.append(vid_steps[vid_peaks[j-1]:vid_peaks[j]])
                 ret_labels.append(self.labels[i])
         assert len(ret_val) == len(ret_labels)
-        return ret_val, ret_labels
+        return ret_val, np.array(ret_labels)
 
 
 
