@@ -19,6 +19,7 @@ def manhattan_distance(a, b):
         d += abs(x - y)
     return d
 
+
 class LinearAssignmentClassifier():
     def __init__(self, dataset, num_dims=3, num_phases=4):
         self.num_phases = num_phases
@@ -29,8 +30,8 @@ class LinearAssignmentClassifier():
         self.y = dataset.y_train
         self.q = dataset.q_train
 
-        self.n_features = dataset.X_train.shape[-1] // num_dims
-        self.n_timesteps = dataset.X_train.shape[1]
+        self.n_features = dim(dataset.X_train)[-1] // num_dims
+        self.n_timesteps = dim(dataset.X_train)[1]
         
         # self.y = self.remove_one_hot(self.y)
         self.X, self.y, self.q = self.create_gallery(self.X, self.y, self.q) # (n_features//3, n_classes * n_samples * n_timesteps, 3)
@@ -268,17 +269,30 @@ class LinearAssignmentClassifier():
     def create_cost_matrix(self, X):
         cost_matrices = []
         print("Creating cost matrix")
-        loop = tqdm(range(X.shape[0]))
+        loop = tqdm(range(len(X)))
         for i in loop:
             curr_cycle = i % self.num_phases
             curr_s = X[i]
             cost_matrix_for_this_test_sample = [] # Should be shape (n_timesteps, n_cols, 3)
-            
-            to_add = curr_s.reshape(-1, curr_s.shape[-1]//self.num_dims, self.num_dims)
+
+            # print(dim(curr_s))
+            # quit()
+            # tmp = []
+            # for a in curr_s:
+            #     tmp.append([
+            #         a[x::dim(curr_s)[-1] // self.num_dims]
+            #         for x in range(dim(curr_s)[-1] // self.num_dims)
+            #     ])
+            # to_add = tmp
+            # to_add = curr_s.reshape(-1, curr_s.shape[-1]//self.num_dims, self.num_dims)
     
-            for t in range(to_add.shape[0]): # Per timestep                
-                cost_matrix_for_this_timestamp = []
-                cost_matrix_for_this_timestamp = np.array([np.abs(curr_s[t, x::self.num_dims] - self.X[curr_cycle][:, :, x].T).astype(np.float64).sum(axis=1) for x in range(self.num_dims)]).T
+            for t in range(len(curr_s)): # Per timestep                
+                # cost_matrix_for_this_test_timestamp = []
+                # for v in range(len(self.X[curr_cycle][t])):
+                cost_matrix_for_this_timestamp = np.array([np.abs(np.array(curr_s[t])[x::self.num_dims] - self.X[curr_cycle][:, :, x].T).astype(np.float64).sum(axis=1) for x in range(self.num_dims)]).T
+                # print(cost_matrix_for_this_timestamp.shape)
+                # quit()
+                # cost_matrix_for_this_test_timestamp.append(cost_matrix_for_this_timestamp)
                 
                 cost_matrix_for_this_test_sample.append(np.array(cost_matrix_for_this_timestamp))
             cost_matrices.append(np.array(cost_matrix_for_this_test_sample))
@@ -299,7 +313,7 @@ class LinearAssignmentClassifier():
         q_vals = []
         for i in range(self.num_phases):
             x_new, y_new, q_new = self._create_gallery(i, X, y, q)
-            x_vals.append(x_new)
+            x_vals.append(np.array(x_new))
             y_vals.append(y_new)
             q_vals.append(q_new)
         return x_vals, y_vals, q_vals
@@ -307,31 +321,52 @@ class LinearAssignmentClassifier():
     
     def _create_gallery(self, step, X, y, q, total_steps=4):
         # Feature Vector for Stage 1: (n_features//3, n_classes * n_samples * n_timesteps, 3)
-        first_stages = X[step::total_steps, :, :]
+        first_stages = X[step::total_steps]
         y_possibilities = y[step::total_steps]
-        q_for_this_stage = q[step::total_steps,:]
+        q_for_this_stage = q[step::total_steps]
         set_of_matrices = []
         set_of_qs = None
         y_selection = []
         for i in range(self.dataset.n_classes):
+            selection_indices = np.where(y_possibilities == i)[0]
+            tmp1 = []
+            tmp2 = []
+            for s in selection_indices:
+                tmp1.append(first_stages[s])
+                tmp2.append(q_for_this_stage[s])
+
             
-            curr_selection = first_stages[np.where(y_possibilities == i),...]
-            curr_q = q_for_this_stage[np.where(y_possibilities == i),...]
-            
-            curr_selection = curr_selection.reshape(-1, X.shape[-1])
-            curr_q = curr_q.reshape(-1)
+            curr_selection = tmp1# first_stages[np.where(y_possibilities == i),...]
+            curr_q = tmp2 # q_for_this_stage[np.where(y_possibilities == i),...]
+            # print(dim(curr_selection))
+            # quit()
+            tmp = []
+            for j in range(len(curr_selection)):
+                    tmp.extend(curr_selection[j])
+                # for k in range(len(curr_selection[j])):
+
+            curr_selection = tmp
+
+            tmp = []
+            for a in curr_q:
+                tmp.extend(a)
+
+            # print(dim(curr_q))
+            # quit()
+            curr_q = tmp#curr_q.reshape(-1)
 
             if set_of_qs is None:
                 set_of_qs = curr_q
             else:
                 set_of_qs = np.concatenate((set_of_qs, curr_q))
 
-            for f in range(X.shape[-1] // self.num_dims):
-                curr_feature_selection = curr_selection[:, self.num_dims * f: self.num_dims * f + self.num_dims]
+            for f in range(dim(X)[-1] // self.num_dims):
+                # print(curr_selection)
+                curr_feature_selection = [x[self.num_dims * f: self.num_dims * f + self.num_dims] for x in curr_selection]
                 if len(set_of_matrices) <= f:
                     set_of_matrices.append(curr_feature_selection)
                 else:
                     set_of_matrices[f] = np.concatenate((set_of_matrices[f], curr_feature_selection), axis=0)
-            y_selection += [i] * curr_selection.shape[0]
+            y_selection += [i] * len(curr_selection)
 
         return np.array(set_of_matrices), y_selection, set_of_qs

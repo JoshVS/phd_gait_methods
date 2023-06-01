@@ -173,7 +173,7 @@ def write_to_file(filename, kps):
 
 class HARDetection(GenericGaitDataset):
     def __init__(self, directory='har_detection/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False):
-        super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
+        super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, individual_steps=False, extract_steps=extract_steps)
         self.initialise_stuff()
         
     def create_file_data(self, kp_dict):
