@@ -1,5 +1,5 @@
-from dataset import HARDetection
-from linear_assignment import LinearAssignmentClassifier
+from dataset_loaders.naive_kinect_dataset import HARDetection
+from classifiers.linear_assignment import LinearAssignmentClassifier
 
 ds = HARDetection(generate_test_video=None)
 classifier = LinearAssignmentClassifier(ds, num_dims=2, num_phases=1)

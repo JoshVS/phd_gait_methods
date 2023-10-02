@@ -5,7 +5,7 @@ import cv2
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
 from scipy.interpolate import interp1d
-from genericdataset import GenericGaitDataset
+from .genericdataset import GenericGaitDataset
 
 from scipy.signal import savgol_filter, find_peaks, argrelmax, argrelmin
 

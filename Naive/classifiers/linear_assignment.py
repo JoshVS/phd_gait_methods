@@ -1,10 +1,5 @@
 import numpy as np
-from dataset import NaiveKinectDataset
-from genericdataset import dim
-from naive_classifier import create_classifier, create_frame_level_classifier
-import wandb
-from tensorflow.keras.callbacks import Callback, EarlyStopping, ReduceLROnPlateau
-import matplotlib
+from dataset_loaders.genericdataset import dim
 # matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from tqdm import tqdm
