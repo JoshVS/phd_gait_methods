@@ -84,7 +84,7 @@ class CASIADataset(GenericGaitDataset):
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.initialise_stuff()
 
-    def create_file_data(self, kp_dict):
+    def create_file_data(self, kp_dict, max_samples):
         if not os.path.exists("cached/"):
             os.makedirs("cached")
         # subdirs = os.listdir(self.directory)
@@ -114,14 +114,30 @@ class CASIADataset(GenericGaitDataset):
         # return videos, kp_dict
         classes = []
         videos = []
+        vid_filenames = []
         person_id = 1
         def create_person_string(p_id):
             return f"{'0' if p_id < 10 else ''}{p_id}"
         p_string = create_person_string(person_id)
         list_of_files = glob.glob(f"*-*-{p_string}-*.avi", root_dir=self.directory)
+        if max_samples is None:
+            pass
+        elif 0 < max_samples < 1:
+            list_of_files = list_of_files[:int(len(list_of_files) * max_samples)]
+        elif max_samples < len(list_of_files):
+            list_of_files = list_of_files[:int(max_samples)]
+            
         while len(list_of_files) > 0:
+            
+            if max_samples is None:
+                pass
+            elif 0 < max_samples < 1:
+                list_of_files = list_of_files[:int(len(list_of_files) * max_samples)]
+            elif max_samples < len(list_of_files):
+                list_of_files = list_of_files[:int(max_samples)]
             classes.append(person_id)
             class_vids = []
+            class_vid_filenames = []
 
             loop = tqdm(list_of_files)
             if not os.path.exists(f"cached/{p_string}/"):
@@ -137,14 +153,16 @@ class CASIADataset(GenericGaitDataset):
                     filename = os.path.join(self.directory, vid)
                     c = get_kp_from_file(filename, kp_dict)
                     class_vids.append(c)
+                    class_vid_filenames.append(filename)
                     write_to_file(f"cached/{p_string}/{vid}.txt", c)
             videos.append(class_vids)
+            vid_filenames.append(class_vid_filenames)
 
 
             person_id += 1
             p_string = create_person_string(person_id)
             list_of_files = glob.glob(f"*-*-{p_string}-*.avi", root_dir=self.directory)
-            
+        self.video_filenames = vid_filenames
         self.classes = classes
         return videos, kp_dict
             
@@ -188,7 +206,7 @@ class CASIADataset(GenericGaitDataset):
         kp_dict = {}
         for i, s in enumerate(keypoints_arr):
             kp_dict[s] = i
-        return self.create_file_data(kp_dict)
+        return self.create_file_data(kp_dict, max_samples)
         
 
     def setup_information(self):        

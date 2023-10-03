@@ -80,6 +80,7 @@ class GenericGaitDataset:
         self.t_interp = t_interp
         self.extract_steps = extract_steps
         self.max_samples = max_samples
+        self.video_filenames = []
         # print(extract_steps, directory)
         # quit()
         self.max_samples = max_samples
@@ -101,7 +102,7 @@ class GenericGaitDataset:
             self.rotation_vector(2)
             if self.generate_test_video is not None:
                 self.show_video(self.generate_test_video)
-        if self.generate_test_video is not None:
+        if self.generate_test_video is not None and self.generate_test_video < 0:
             quit()
 
         self.X, self.y = self.get_individual_steps()
@@ -313,7 +314,7 @@ class GenericGaitDataset:
 
 
 
-    def smooth_walk(self, x, window=4):
+    def smooth_walk(self, x, window=1):
         d_trans = []
         for i in range(len(x)):
             lower = 0 if i < window else i - window
@@ -326,8 +327,9 @@ class GenericGaitDataset:
     def _find_peaks_for_video(self, i):
         d = self.smooth_walk(self.ankle_distances(i))
         try:
-            filtered_distances = savgol_filter(d, 9, 3)
-        except ValueError:
+            filtered_distances = savgol_filter(d, 15 if len(d) > 15 else len(d) - 1, 2)
+        except ValueError as e:
+            print(str(e))
             print(d)
             quit()
         max_peaks = argrelmax(filtered_distances)[0]
@@ -363,7 +365,7 @@ class GenericGaitDataset:
         
 
     def show_video(self, i, include_centroids=False, max_frames=200, outfile = "plots.gif"):
-        frames = []
+        i = abs(i)
         print()
         print("Generating Video...")
         loop = tqdm(range(len(self.X[i][:(-1 if len(self.X[i]) < max_frames else max_frames)])))

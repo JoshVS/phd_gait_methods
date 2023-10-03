@@ -335,6 +335,7 @@ class KinectDataset:
                     reshaped_skel[-1][-1].append([l[1], l[2]])
                 if len(reshaped_skel[-1][-1]) != 20:
                     print(len(reshaped_skel[-1][-1]))
+                    print("whoops")
                     quit()
         return reshaped_skel, labels
 
