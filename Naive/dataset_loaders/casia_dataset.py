@@ -194,48 +194,78 @@ class CASIADataset(GenericGaitDataset):
     def setup_information(self):        
         self.step_classifier = RandomForestClassifier()        
         self.connections = [
-            ('Head', 'Shoulder-Center'),
-            ('Shoulder-Center', 'Shoulder-Right'),
-            ('Shoulder-Center', 'Shoulder-Left'),
-            ('Shoulder-Center', 'Spine'),
-            ('Spine', 'Hip-centro'),
-            ('Hip-centro', 'Hip-Left'),            
-            ('Hip-centro', 'Hip-Right'),            
-            ('Hip-Right', 'Knee-Right'),            
-            ('Hip-Left', 'Knee-Left'),            
-            ('Knee-Right', "Ankle-Right"),                    
-            ("Ankle-Right", 'Foot-Right'),        
-            ('Knee-Left', "Ankle-Left"),                    
-            ("Ankle-Left", 'Foot-Left'),
-            ("Shoulder-Left", "Elbow-Left"),
-            ("Elbow-Left", "Wrist-Left"),
-            ("Wrist-Left", "Hand-Left"),
-            ("Shoulder-Right", "Elbow-Right"),
-            ("Elbow-Right", "Wrist-Right"),
-            ("Wrist-Right", "Hand-Right"),
+            ('nose', 'right_eye_inner'),
+            ('nose', 'left_eye_inner'),
+            ('left_eye_inner', 'left_eye'),
+            ('left_eye', 'left_eye_outer'),
+            ('left_eye_outer', 'left_ear'),
+            
+            ('right_eye_inner', 'right_eye'),
+            ('right_eye', 'right_eye_outer'),
+            ('right_eye_outer', 'right_ear'),
+
+            ('mouth_left', 'mouth_right'),
+
+            ('left_shoulder', 'right_shoulder'),
+
+            ('left_shoulder', 'left_elbow'),
+            ('left_elbow', 'left_wrist'),
+            ('left_wrist', 'left_thumb'),
+            ('left_wrist', 'left_index'),
+            ('left_wrist', 'left_pinky'),
+
+            
+            ('right_shoulder', 'right_elbow'),
+            ('right_elbow', 'right_wrist'),
+            ('right_wrist', 'right_thumb'),
+            ('right_wrist', 'right_index'),
+            ('right_wrist', 'right_pinky'),
+
+            ('right_shoulder', 'right_hip'),
+            ('left_shoulder', 'left_hip'),
+            ('right_hip', 'left_hip'),
+
+            ('left_hip', 'left_knee'),
+            ('left_knee', 'left_ankle'),
+            ('left_ankle', 'left_heel'),
+            ('left_ankle', 'left_foot_index'),
+
+            
+            ('right_hip', 'right_knee'),
+            ('right_knee', 'right_ankle'),
+            ('right_ankle', 'right_heel'),
+            ('right_ankle', 'right_foot_index'),
+
         ]
 
         self.upper_torso = [
-            "Head",
-            "Shoulder-Center",
-            "Shoulder-Right",
-            "Shoulder-Left"        
+            "nose",
+            "right_eye_inner",
+            "right_eye",
+            "right_eye_outer",
+            "right_ear",
+            
+            "left_eye_inner",
+            "left_eye",
+            "left_eye_outer",
+            "left_ear",
+
+            "left_shoulder",
+            "right_shoulder"
         ]
 
         self.lower_torso = [
-            "Spine",
-            "Hip-centro",
-            "Hip-Right",
-            "Hip-Left"
+            "left_hip",
+            "right_hip"
         ]
-        self.headpoint = "Head"
-        self.left_elbow = "Elbow-Left"
-        self.right_elbow = "Elbow-Right"
-        self.left_knee = "Knee-Left"
-        self.right_knee = "Knee-Right"
-        self.right_wrist = "Wrist-Right"
-        self.left_wrist = "Wrist-Left"
-        self.left_ankle = "Ankle-Left"
-        self.right_ankle = "Ankle-Right"
+        self.headpoint = "nose"
+        self.left_elbow = "left_elbow"
+        self.right_elbow = "right_elbow"
+        self.left_knee = "left_knee"
+        self.right_knee = "right_knee"
+        self.right_wrist = "right_wrist"
+        self.left_wrist = "left_wrist"
+        self.left_ankle = "left_ankle"
+        self.right_ankle = "right_ankle"
 
             
