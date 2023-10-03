@@ -373,10 +373,15 @@ class GenericGaitDataset:
         peaks = self._find_peaks_for_video(i)[::2]
         step_count = 1
         
-        fig, ax = plt.subplots(2)
+        fig, ax = plt.subplots(3)
         # ax = fig.add_subplot()
         # ankle_ax = fig.add_subplot()
-        ax, ankle_ax = ax[0], ax[1]
+        cap = cv2.VideoCapture(self.video_filenames[i])
+        if not cap.isOpened():
+            print(f"Error opening file {self.video_filenames[i]}")
+            quit()
+        frames = []
+        ax, ankle_ax, vid_ax = ax[0], ax[1], ax[2]
         camera = Camera(fig)
         
         for a in loop:
@@ -415,6 +420,13 @@ class GenericGaitDataset:
             # print(*lines[:2])
             # quit()
             # quit()
+            ret, frame = cap.read()
+            if not ret:
+                print("There was an error")
+                quit()
+            im = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            vid_ax.imshow(im)
+
             ax.scatter(*coords)
             camera.snap()
             loop.set_postfix()

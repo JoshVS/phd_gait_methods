@@ -148,20 +148,21 @@ class CASIADataset(GenericGaitDataset):
                     to_append = read_from_cached_file(f"cached/{p_string}/{vid}.txt")
                     if to_append is not None:
                         class_vids.append(to_append)
+                        vid_filenames.append(os.path.join(self.directory, vid))
                 else:
                     print(f"File cached/{p_string}/{vid}.txt doesn't exist, creating")
                     filename = os.path.join(self.directory, vid)
                     c = get_kp_from_file(filename, kp_dict)
                     class_vids.append(c)
-                    class_vid_filenames.append(filename)
+                    vid_filenames.append(filename)
                     write_to_file(f"cached/{p_string}/{vid}.txt", c)
             videos.append(class_vids)
-            vid_filenames.append(class_vid_filenames)
 
 
             person_id += 1
             p_string = create_person_string(person_id)
             list_of_files = glob.glob(f"*-*-{p_string}-*.avi", root_dir=self.directory)
+
         self.video_filenames = vid_filenames
         self.classes = classes
         return videos, kp_dict
