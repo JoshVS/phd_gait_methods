@@ -1,6 +1,7 @@
 from dataset_loaders.casia_dataset import CASIADataset
-from classifiers.linear_assignment import LinearAssignmentClassifier
+from classifiers.gcn_classifier import GCNClassifier
 
-ds = CASIADataset(generate_test_video=None, max_samples=512)
-classifier = LinearAssignmentClassifier(ds, num_dims=2, num_phases=1)
+ds = CASIADataset(generate_test_video=None, max_samples=4)
+
+classifier = GCNClassifier(ds)
 classifier.generate_test_set_results()

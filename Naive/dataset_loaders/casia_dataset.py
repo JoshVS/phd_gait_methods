@@ -15,7 +15,19 @@ from sklearn.ensemble import RandomForestClassifier
 import mediapipe as mp
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+def _dim(l, check_for_error):
+    if type(l) != list and type(l) != np.ndarray:
+        return []
+    else:
+        if type(l[0]) == list and check_for_error:
+            next_dim = len(l[0])
+            for mini_l in l[1:]:
+                if len(mini_l) != next_dim:
+                    raise ValueError("Array is sparse")
+        return [len(l)] + _dim(l[0], check_for_error)
 
+def dim(l, check_for_error=False):
+    return tuple(_dim(l, check_for_error))
 
 def read_from_cached_file(filename):
     with open(filename, 'r') as in_file:
@@ -83,6 +95,47 @@ class CASIADataset(GenericGaitDataset):
     def __init__(self, directory='../../../Datasets/CASIA/DatasetB-2/video/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False):
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.initialise_stuff()
+
+    def initialise_stuff(self):
+        self.skel_data, self.kp_indices = self._get_file_data(self.max_samples) # (n_people, n_files, n_lines, 3)
+
+        self.setup_information()
+        self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
+        
+        self.X, self.labels = self.reshape_skeletons()
+        
+        self.y  = self.labels
+
+        
+
+        self.translation_vector()
+        self.scaling_vector()
+        if self.generate_test_video is not None:
+            self.show_video(self.generate_test_video)
+        if self.num_dims > 2:
+            self.rotation_vector(2)
+            if self.generate_test_video is not None:
+                self.show_video(self.generate_test_video)
+        if self.generate_test_video is not None and self.generate_test_video < 0:
+            quit()
+        self.X, self.y = self.get_individual_steps()
+   
+        
+        self.interpolate_by_time()
+        
+        self.n_classes = len(np.unique(self.y))
+
+        self.interpolate_by_time()
+        
+
+        self.q = self.quality_matrices()
+
+        self.y_raw = self.y.copy()
+        # self.y = self.to_one_hot()
+        # self.X = self.get_position_vectors()
+        self.split_train_and_test()
+
+
 
     def create_file_data(self, kp_dict, max_samples):
         if not os.path.exists("cached/"):
@@ -257,6 +310,8 @@ class CASIADataset(GenericGaitDataset):
 
         ]
 
+        self.edge_matrix = [[self.kp_indices[x] for x, _ in self.connections], [self.kp_indices[y] for _, y in self.connections]]
+
         self.upper_torso = [
             "nose",
             "right_eye_inner",
@@ -287,4 +342,8 @@ class CASIADataset(GenericGaitDataset):
         self.left_ankle = "left_ankle"
         self.right_ankle = "right_ankle"
 
-            
+    def create_edge_matrix(self):
+        self.split_train_and_test()
+        
+
+        
