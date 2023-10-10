@@ -3,10 +3,12 @@ import cv2
 import glob
 
 import numpy as np
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from .genericdataset import GenericGaitDataset
 
 
+from scipy.interpolate import interp1d
 # matplotlib.use('TkAgg')
 np.seterr(all='raise')
 
@@ -104,9 +106,10 @@ class CASIADataset(GenericGaitDataset):
         
         self.X, self.labels = self.reshape_skeletons()
         
+        
         self.y  = self.labels
 
-        
+
 
         self.translation_vector()
         self.scaling_vector()
@@ -118,17 +121,18 @@ class CASIADataset(GenericGaitDataset):
                 self.show_video(self.generate_test_video)
         if self.generate_test_video is not None and self.generate_test_video < 0:
             quit()
-        self.X, self.y = self.get_individual_steps()
    
-        
+        # quit()     
+        # self.X, self.y = self.get_individual_steps()
+   
         self.interpolate_by_time()
         
         self.n_classes = len(np.unique(self.y))
 
-        self.interpolate_by_time()
+        # self.interpolate_by_time()
         
 
-        self.q = self.quality_matrices()
+        # self.q = self.quality_matrices()
 
         self.y_raw = self.y.copy()
         # self.y = self.to_one_hot()
@@ -136,6 +140,166 @@ class CASIADataset(GenericGaitDataset):
         self.split_train_and_test()
 
 
+    def interpolate_by_time(self, convert_to_numpy=True):
+        min_frames = min([len(x) for x in self.X])
+        for i in range(len(self.X)):
+            curr_sample = self.X[i]
+            x = np.arange(len(curr_sample))
+            # print(len(curr_sample), i, len(self.X))
+            f = interp1d(x, curr_sample, axis=0)
+            xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
+            # print(xnew, len(curr_sample))
+            # quit()
+            ynew = f(xnew)
+            self.X[i] = ynew
+        if convert_to_numpy:
+            self.X = np.array(self.X)
+
+    def split_train_and_test(self, split=0.1):
+        self.X_train, self.X_test, self.y_train, self.y_test, self.y_raw_train, self.y_raw_test = train_test_split(self.X, self.y, self.y_raw, test_size=split)
+
+    def scaling_vector(self):
+        for i in range(len(self.X)):
+            for j in range(len(self.X[i])):
+                ct, ut, lt = self.get_centroid(self.X[i][j])
+                self.X[i][j] = self._scaling_vector(self.X[i][j], ut, lt)
+
+    def _scaling_vector(self, X, ut, lt):
+        diff = [a - b for (a, b) in zip(ut, lt)]
+        scale_val = np.sqrt(sum([a**2 for a in diff]))
+        return X / scale_val#[a / scale_val for a in X]
+
+
+    def create_graph_shift_operator(self):
+        gso = np.zeros((self.X.shape[-2], self.X.shape[-2]))
+        for i in range(len(self.edge_matrix[0])):
+            ind1 = self.edge_matrix[0][i]
+            ind2 = self.edge_matrix[1][i]
+            gso[ind1, ind2] = 1
+            gso[ind2, ind1] = 1
+        # gso = np.empty((len(self.edge_matrix[0]), len(self.edge_matrix)))
+        # for i in range(gso.shape[0]):
+        #     gso[i, 0] = self.edge_matrix[0][i]
+        #     gso[i, 1] = self.edge_matrix[1][i]
+        return gso
+        
+    def get_centroid(self, X):
+        # Step 1: Get upper Centroid and Lower Centroid
+        upper_limbs = []
+        for u in self.upper_torso:
+            upper_limbs.append(X[self.kp_indices[u]])
+        # uc = [sum(upper_limbs[x::self.num_dims]) / len(self.upper_torso) for x in range(self.num_dims)]
+        uc = np.einsum("ij-> j", upper_limbs)
+      
+
+
+        lower_limbs = []
+        for l in self.lower_torso:
+            lower_limbs.append(X[self.kp_indices[l]])
+        lc = np.einsum("ij-> j", lower_limbs)
+
+        return np.array([(x + y) / 2 for (x, y) in zip(uc, lc)]), uc, lc
+
+    def rotation_vector(self, tm):
+        print("Creating Rotation Matrix")
+        loop = tqdm(range(len(self.X)))
+        for i in loop:
+            
+            centroids = []
+            for j in range(len(self.X[i])):                
+                centroids.append( self.get_centroid(self.X[i][j]))
+
+                ct, ut, lt = centroids[-1]
+                if j > tm:
+                    ang = 0
+                    ct_prev, _,_ = centroids[j - tm]
+                    self.X[i][j], ang = self._rotation_vector(self.X[i][j], self.X[i][j - tm], ct, ut, lt, ct_prev, ang)
+
+    def _rotation_vector(self, X, Xp, ct, ut, lt, ct_prev, def_ang):
+        d = np.sqrt(sum([(a - b)**2 for a, b in zip(ct, ct_prev)]))
+        # try:
+        # rmov = []
+        # for a, b in zip(ct, ct_prev):
+        #     try:
+        #         rmov.append((a - b) / d)
+        #     except FloatingPointError:
+        #         print(a, b, (a - b), d)
+        #         quit()
+        if d > 0:
+            rmov = [(a - b) / d for a, b in zip(ct, ct_prev)]
+            # except FloatingPointError:
+                # print(a, b, (a - b),)
+            self.rmov = rmov
+            x = np.abs(rmov[0] - ct[0])
+            r = np.sqrt((rmov[0] - ct[0]) ** 2 + (rmov[2] - ct[2]) ** 2)
+            ang = np.arcsin(x / r) if r > 0 else 0
+        else:
+            ang = def_ang
+
+        R_inv = [
+            [np.cos(ang), 0, np.sin(ang)],
+            [0, 1, 0],
+            [-np.sin(ang), 0, np.cos(ang)]
+        ]
+
+        # dcen = np.sqrt(sum([(a - b)**2 for a, b in zip(ut, lt)]))
+        # rtop = [(a - b) / dcen for a, b in zip(ut, lt)]
+        # self.rtop = rtop
+
+        # cross_prod = np.cross(rtop, rmov)
+        # dcross = np.sqrt(sum(a**2 for a in cross_prod))
+        # rleft = [a / dcross for a in cross_prod]
+        # self.rleft = rleft
+
+        # R_mat = np.array([
+        #     rmov,
+        #     rtop,
+        #     rleft
+        # ])
+
+        # R_inv = R_mat # np.linalg.inv(R_mat)
+
+        # print(R_inv.shape)
+        # quit()
+
+        ret_val = []
+        for i in range(len(X) // self.num_dims):
+            curr_vals = X[i * self.num_dims: i * self.num_dims + self.num_dims]
+            # print(np.dot(R_inv, curr_vals).shape)
+            # quit()
+            ret_val += list(np.dot(R_inv, curr_vals))
+
+        return ret_val, ang
+
+
+        # cross_prod = np.cross(rtop, rmov)
+        
+
+    def translation_vector(self):
+        for i in range(len(self.X)):
+            for j in range(len(self.X[i])):
+                ct, ut, lt = self.get_centroid(self.X[i][j])
+                self.X[i][j] = self._translation_vector(self.X[i][j], ct)
+
+    def _translation_vector(self, X, ct):        
+        # Step 2: Translation Vector
+        pt = ct.T
+        return X - pt
+
+    def reshape_skeletons(self):
+        # Need skeleton to be shape (vid_seq, frame, keypoints, 2)
+        labels = []
+        reshaped_skel = []
+        for i, person in enumerate(self.skel_data):
+            # reshaped_skel.append([])
+            for f in person:
+                reshaped_skel.append([])
+                labels.append(i)
+                for l in f:
+                    if l[0] == self.headpoint:
+                        reshaped_skel[-1].append([])
+                    reshaped_skel[-1][-1].append(l[1:])
+        return reshaped_skel, labels
 
     def create_file_data(self, kp_dict, max_samples):
         if not os.path.exists("cached/"):
