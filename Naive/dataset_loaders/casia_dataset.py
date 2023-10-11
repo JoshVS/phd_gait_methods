@@ -94,12 +94,14 @@ def write_to_file(filename, kps):
 
 class CASIADataset(GenericGaitDataset):
 
-    def __init__(self, directory='../../../Datasets/CASIA/DatasetB-2/video/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False):
+    def __init__(self, directory='../../../Datasets/CASIA/DatasetB-2/video/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.3):
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
+        self.test_split = test_split
         self.initialise_stuff()
 
     def initialise_stuff(self):
         self.skel_data, self.kp_indices = self._get_file_data(self.max_samples) # (n_people, n_files, n_lines, 3)
+        
 
         self.setup_information()
         self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
@@ -107,12 +109,15 @@ class CASIADataset(GenericGaitDataset):
         self.X, self.labels = self.reshape_skeletons()
         
         
+        
         self.y  = self.labels
 
 
 
-        self.translation_vector()
-        self.scaling_vector()
+        # self.translation_vector()
+        # self.scaling_vector()
+        # print(self.X)
+        # quit()
         if self.generate_test_video is not None:
             self.show_video(self.generate_test_video)
         if self.num_dims > 2:
@@ -155,8 +160,10 @@ class CASIADataset(GenericGaitDataset):
         if convert_to_numpy:
             self.X = np.array(self.X)
 
-    def split_train_and_test(self, split=0.1):
-        self.X_train, self.X_test, self.y_train, self.y_test, self.y_raw_train, self.y_raw_test = train_test_split(self.X, self.y, self.y_raw, test_size=split)
+    def split_train_and_test(self):
+        # print(dim(self.y))
+        # quit()
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y, test_size=self.test_split)
 
     def scaling_vector(self):
         for i in range(len(self.X)):
