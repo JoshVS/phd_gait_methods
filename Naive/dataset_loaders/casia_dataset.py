@@ -133,6 +133,8 @@ class CASIADataset(GenericGaitDataset):
         self.interpolate_by_time()
         
         self.n_classes = len(np.unique(self.y))
+        self.y = self.convert_to_one_hot()
+        
 
         # self.interpolate_by_time()
         
@@ -143,6 +145,12 @@ class CASIADataset(GenericGaitDataset):
         # self.y = self.to_one_hot()
         # self.X = self.get_position_vectors()
         self.split_train_and_test()
+
+    def convert_to_one_hot(self):
+        onehot_mat = np.zeros((len(self.y), self.n_classes))
+        for i in range(onehot_mat.shape[0]):
+            onehot_mat[i, self.y[i]] = 1
+        return onehot_mat
 
 
     def interpolate_by_time(self, convert_to_numpy=True):
