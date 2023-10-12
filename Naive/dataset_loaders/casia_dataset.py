@@ -114,8 +114,8 @@ class CASIADataset(GenericGaitDataset):
 
 
 
-        # self.translation_vector()
-        # self.scaling_vector()
+        self.translation_vector()
+        self.scaling_vector()
         # print(self.X)
         # quit()
         if self.generate_test_video is not None:
