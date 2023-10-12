@@ -18,6 +18,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
+
+ORIG_TIME_CHANNELS = 64
+SPACE_CHANNELS = 64
+
+TIME_CHANNELS = ORIG_TIME_CHANNELS // 2
+
 
 
 def to_one_hot(y):
@@ -49,7 +59,7 @@ class TemporalGatedConv(nn.Module):
 
         
         super(TemporalGatedConv, self).__init__()
-        self.conv = nn.Conv1d(time_channels, 64, kernel_size=1)
+        self.conv = nn.Conv1d(time_channels, ORIG_TIME_CHANNELS, kernel_size=1)
         self.flatten = nn.Flatten(start_dim = 0, end_dim=1)
         self.unflatten = nn.Unflatten(0, (-1, nodes))
         self.glu = nn.GLU(dim=1)
@@ -86,10 +96,10 @@ class MySTGCNBlock(nn.Module):
         
         super(MySTGCNBlock, self).__init__()
         self.time1 = TemporalGatedConv(time_channels, nodes)
-        self.convblock = G.torch_geometric.nn.conv.GraphConv(2, 16)        
-        self.time2 = TemporalGatedConv(32, nodes)
+        self.convblock = G.torch_geometric.nn.conv.GraphConv(2, SPACE_CHANNELS)        
+        self.time2 = TemporalGatedConv(TIME_CHANNELS, nodes)
         self.flatten = nn.Flatten(start_dim=0, end_dim=1)
-        self.unflatten = nn.Unflatten(0, (-1, 32))
+        self.unflatten = nn.Unflatten(0, (-1, TIME_CHANNELS))
 
     def forward(self, X, edge_mat):
         x1 = self.time1(X)
@@ -107,10 +117,10 @@ class MySTGCN(nn.Module):
         
         super(MySTGCN, self).__init__()
         self.block1 = MySTGCNBlock(time_channels, nodes)
-        self.block2 = MySTGCNBlock(32, nodes)
-        self.full1 = nn.Linear(32 * nodes * features, 128)
-        self.full2 = nn.Linear(128, 64)
-        self.FC = nn.Linear(64, classes)
+        self.block2 = MySTGCNBlock(TIME_CHANNELS, nodes)
+        self.full1 = nn.Linear(TIME_CHANNELS * nodes * features, 512)
+        self.full2 = nn.Linear(512, 512)
+        self.FC = nn.Linear(512, classes)
         self.flatten = nn.Flatten(start_dim=1)
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(1)
@@ -137,21 +147,21 @@ class GCNClassifier():
     """
     def __init__(self, dataset, num_dims=3, num_phases=4):
         self.dataset = dataset
-        self.X = torch.tensor(dataset.X_train).float()
-        self.X_test = torch.tensor(dataset.X_test).float()
-        self.y = torch.tensor(dataset.y_train)
-        self.y_test = torch.tensor(dataset.y_test)
+        self.X = torch.tensor(dataset.X_train).float().to(device)
+        self.X_test = torch.tensor(dataset.X_test).float().to(device)
+        self.y = torch.tensor(dataset.y_train).to(device)
+        self.y_test = torch.tensor(dataset.y_test).to(device)
         self.n_features = dim(dataset.X_train)[-1] // num_dims
 
         self.n_classes = dataset.n_classes
-        self.edges = torch.tensor(dataset.edge_matrix)
+        self.edges = torch.tensor(dataset.edge_matrix).to(device)
         self.adj_mat = torch.tensor(self.dataset.create_graph_shift_operator()).int()
 
 
         blocks = []
         blocks.append([self.X.shape[1]])
-        blocks.append([64, 16, 64])
-        blocks.append([64, 16, 64])
+        blocks.append([ORIG_TIME_CHANNELS, SPACE_CHANNELS, ORIG_TIME_CHANNELS])
+        blocks.append([ORIG_TIME_CHANNELS, SPACE_CHANNELS, ORIG_TIME_CHANNELS])
         blocks.append([self.X.shape[-1]])
 
        
@@ -162,7 +172,7 @@ class GCNClassifier():
         num_features = self.X.shape[-1]
         num_timesteps = self.X.shape[1]
 
-        self.model = MySTGCN(num_timesteps, num_nodes, num_features, self.n_classes)
+        self.model = MySTGCN(num_timesteps, num_nodes, num_features, self.n_classes).to(device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)#, weight_decay=5e-4)
         self.criterion = torch.nn.CrossEntropyLoss()
        
@@ -195,7 +205,7 @@ class GCNClassifier():
         pred[:, out.argmax(dim=1)] = 1
         test_val = self.y_test.argmax(dim=1)
         print(pred.shape, self.y_test.shape)
-        print(pred)
+        print(out)
         quit()
         # print(out)
         # quit()
@@ -207,7 +217,7 @@ class GCNClassifier():
         return test_acc
     
     def generate_test_set_results(self):
-        self.train(10)
+        self.train(100)
         acc = self.test()
         print(f"Accuracy: {acc:.2f}")
 
