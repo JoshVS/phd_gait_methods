@@ -54,15 +54,15 @@ def dim(l, check_for_error=False):
 
 class TemporalGatedConv(nn.Module):
 
-    def __init__(self, time_channels, nodes):
+    def __init__(self, features, out_channels, nodes):
         self.nodes = nodes
 
         
         super(TemporalGatedConv, self).__init__()
-        self.conv = nn.Conv1d(time_channels, ORIG_TIME_CHANNELS, kernel_size=1)
+        self.conv = nn.Conv1d(features, out_channels, kernel_size=3)
         self.flatten = nn.Flatten(start_dim = 0, end_dim=1)
         self.unflatten = nn.Unflatten(0, (-1, nodes))
-        self.glu = nn.GLU(dim=1)
+        self.glu = nn.GLU(dim=-1)
     
     def forward(self, X):
         """
@@ -75,11 +75,10 @@ class TemporalGatedConv(nn.Module):
         # print(outp_orig.shape)
         # # quit()
 
-        inp = X.permute(0, 2, 1, 3)
+        inp = X.permute(0, 2, 3, 1) # (n, nodes, features, time)
         inp = self.flatten(inp)#torch.flatten(inp, end_dim=1)
         outp = self.conv(inp)
-        outp = self.unflatten(outp).permute(0, 2, 1, 3)#torch.unflatten(outp, 0, (-1, self.nodes)).permute(0, 2, 1, 3)
-        
+        outp = self.unflatten(outp).permute(0, 3, 1, 2)#torch.unflatten(outp, 0, (-1, self.nodes)).permute(0, 2, 1, 3)
         
         
         outp_g = self.glu(outp)
@@ -92,37 +91,40 @@ class TemporalGatedConv(nn.Module):
 
 class MySTGCNBlock(nn.Module):
 
-    def __init__(self, time_channels, nodes):
+    def __init__(self, timesteps, nodes, features):
         
         super(MySTGCNBlock, self).__init__()
-        self.time1 = TemporalGatedConv(time_channels, nodes)
-        self.convblock = G.torch_geometric.nn.conv.GraphConv(2, SPACE_CHANNELS)        
-        self.time2 = TemporalGatedConv(TIME_CHANNELS, nodes)
+        self.time1 = TemporalGatedConv(features, TIME_CHANNELS, nodes)
+        self.convblock = G.torch_geometric.nn.conv.GraphConv(TIME_CHANNELS//2, SPACE_CHANNELS)        
+        self.time2 = TemporalGatedConv(TIME_CHANNELS//2, TIME_CHANNELS, nodes)
         self.flatten = nn.Flatten(start_dim=0, end_dim=1)
-        self.unflatten = nn.Unflatten(0, (-1, TIME_CHANNELS))
+        self.unflatten = nn.Unflatten(0, (-1, timesteps))
 
     def forward(self, X, edge_mat):
+        in_size = X.shape
         x1 = self.time1(X)
-        orig_size = x1.shape[:2]
+        unflatten_size = x1.shape[1]
+        orig_size = x1.shape
         x1 = self.flatten(x1)#torch.flatten(x1, start_dim=0, end_dim=1)
+        flattened_size = x1.shape
         x2 = self.convblock(x1, edge_mat)
-        x2 = self.unflatten(x1)
+        # print(x2.shape, orig_size, flattened_size, in_size)
+        # quit()
+        x2 = torch.unflatten(x1, 0, (-1, unflatten_size))#self.unflatten(x1)
         # x2 = torch.unflatten(x1, dim=0, sizes=orig_size)
+        # quit()
         x3 = self.time2(x2)
         return x3
     
 class MySTGCN(nn.Module):
 
-    def __init__(self, time_channels, nodes, features, classes):
+    def __init__(self, timesteps, nodes, features, classes):
         
         super(MySTGCN, self).__init__()
-        self.block1 = MySTGCNBlock(time_channels, nodes)
-        self.block2 = MySTGCNBlock(TIME_CHANNELS, nodes)
-        self.block3 = MySTGCNBlock(TIME_CHANNELS, nodes)
-        self.block4 = MySTGCNBlock(TIME_CHANNELS, nodes)
-        self.block5 = MySTGCNBlock(TIME_CHANNELS, nodes)
+        self.block1 = MySTGCNBlock(timesteps, nodes, features)
+        self.block2 = MySTGCNBlock(timesteps, nodes, TIME_CHANNELS//2)
         self.time_full = nn.Linear(nodes * features, 1024)
-        self.full1 = nn.Linear(TIME_CHANNELS * nodes * features, 1024)
+        self.full1 = nn.LazyLinear( 1024)
         self.full2 = nn.Linear(1024, 1024)
         self.FC = nn.Linear(1024, classes)
         self.flatten = nn.Flatten(start_dim=1)
@@ -134,14 +136,7 @@ class MySTGCN(nn.Module):
     def forward(self, X, edge_mat):
         x1 = self.relu(self.block1(X, edge_mat))
         x2 = self.relu(self.block2(x1, edge_mat))
-        x2 = self.relu(self.block3(x1, edge_mat))
-        x2 = self.relu(self.block4(x1, edge_mat))
-        x2 = self.relu(self.block5(x1, edge_mat))
-
-        time_x = self.time_flatten(x2)
-        time_x = self.flatten(time_x)
-        time_x2 = self.time_full(time_x)
-        x3 = self.time_unflatten(time_x2)
+        
 
         x3 = self.flatten(x2)#torch.flatten(x2, start_dim=1)
         x4 = self.full2(self.full1(x3))
@@ -183,7 +178,7 @@ class GCNClassifier():
         num_timesteps = self.X.shape[1]
 
         self.model = MySTGCN(num_timesteps, num_nodes, num_features, self.n_classes).to(device)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, weight_decay=5e-4)#, weight_decay=5e-4)
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=0.05, weight_decay=5e-4)#, weight_decay=5e-4)
         self.criterion = torch.nn.CrossEntropyLoss()
        
 
