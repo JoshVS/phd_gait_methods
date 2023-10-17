@@ -42,12 +42,12 @@ def normalize_digraph(A):
     """Normalizes the graph value and returns the adjancy matrix
 
     Args:
-        A (ndarray): Identity matrix
+        A (ndarray): Identity matrix (nodes, nodes)
 
     Returns:
-        ndarray: Adjacency matrix
+        ndarray: Adjacency matrix (nodes, nodes)
     """    
-    Dl = np.sum(A, 0)
+    Dl = np.sum(A, 0) # Contains number of graphs
     h, w = A.shape
     Dn = np.zeros((w, w))
     for i in range(w):

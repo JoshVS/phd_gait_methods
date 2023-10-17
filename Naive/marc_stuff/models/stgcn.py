@@ -11,6 +11,15 @@ from graphs.mpg import MediapipeGraph
 
 torch.set_default_dtype(torch.double)
 
+
+
+# Hi Josh, 
+
+# Please find attached model code for the stgcn model as well as the graph creation class for mediapipe. 
+# The input shape for the st-gcn model is [batch_size, channels, number_of_frames, nodes, M]
+# Channels is usually 3 or 2 depending if you dealing with 3d or 2d coordinates
+# M is the number of people in the clip, for me it is always 1 person pose data I'm working with.
+
 def weights_init(module_, bs=1):
     if isinstance(module_, nn.Conv2d) and bs == 1:
         nn.init.kaiming_normal_(module_.weight, mode='fan_out')
@@ -30,15 +39,18 @@ class GraphConvolution(nn.Module):
     def __init__(self, in_channels, out_channels, A, cuda_, dropout=0.2):
         super(GraphConvolution, self).__init__()
         self.cuda_ = cuda_
-        self.graph_attn = nn.Parameter(torch.from_numpy(A.astype(np.float32)))
+        self.graph_attn = nn.Parameter(torch.from_numpy(A.astype(np.float32))) #graph_attn is the neighbourhoods - how is it represented?
         nn.init.constant_(self.graph_attn, 1)
         self.A = Variable(torch.from_numpy(A.astype(np.float32)), requires_grad=False)
-        self.num_subset = 3
+
+        # Create Convolutions for each neighbourhood
+        self.num_subset = 3 # number of neighbourhoods
         self.g_conv = nn.ModuleList()
         for i in range(self.num_subset):
-            self.g_conv.append(nn.Conv2d(in_channels, out_channels, 1))
+            self.g_conv.append(nn.Conv2d(in_channels, out_channels, 1)) # different convolutions for each neighbourhood
             weights_init(self.g_conv[i], bs=self.num_subset)
 
+        # Residual connections
         if in_channels != out_channels:
             self.gcn_residual = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, 1),
@@ -49,25 +61,35 @@ class GraphConvolution(nn.Module):
         else:
             self.gcn_residual = lambda x: x
 
+        # Create batch norm layers and dropout
         self.bn = nn.BatchNorm2d(out_channels)
         self.dropout = nn.Dropout(dropout)
         weights_init(self.bn, bs=1e-6)
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        N, C, T, V = x.size()
+        """
+        x: (batch * people, channels, times, nodes)
+        """
+        N, C, T, V = x.size() # (batch, channels, timesteps, nodes)
         if self.cuda_:
             A = self.A.cuda(x.get_device())
         else:
             A = self.A
-        A = A * self.graph_attn
+        A = A * self.graph_attn # apply neighbourhoods to edges
         hidden_ = None
+
+        # Convolution for each neighbourhood
         for i in range(self.num_subset):
-            x_a = x.view(N, C * T, V)
-            # x_a = x_a.double()
+            x_a = x.view(N, C * T, V) #(batch, time * channel, nodes)
+
+            # Find nodes for this neighbourhood
+            # x_a: (batch, time * channel, nodes)
+            # A[i]: 
+
+            # output: (batch, channel, time, nodes)
             z = self.g_conv[i](torch.matmul(x_a, A[i]).view(N, C, T, V))
             hidden_ = z + hidden_ if hidden_ is not None else z
-        # hidden_ = hidden_.float()  # Convert hidden_ to Float data type
         hidden_ = self.bn(hidden_)
         hidden_ = self.dropout(hidden_)
         hidden_ += self.gcn_residual(x)
@@ -86,6 +108,9 @@ class TemporalConvolution(nn.Module):
         weights_init(self.bn, bs=1)
 
     def forward(self, x):
+        """
+        X: Shape (batch, channel, time, nodes)
+        """
         x = self.bn(self.t_conv(x))
         return x
 
@@ -105,6 +130,10 @@ class ST_GCN_block(nn.Module):
             self.residual = TemporalConvolution(in_channels, out_channels, kernel_size=1, stride=stride)
 
     def forward(self, x):
+        """
+        x: (batch * people, channels, times, nodes)
+        """
+        # Graph convolution -> time convolution
         x = self.tcn(self.gcn(x)) + self.residual(x)
         return self.relu(x)
 
@@ -136,15 +165,19 @@ class STGCN(nn.Module):
         weights_init(self.fc, bs=num_class)
 
     def forward(self, x):
+        """
+        X: Shape (batch, channels, time, nodes, people)
+        """
         # n -> batch size, C -> channels 3, T -> num frames, V -> num joints, M -> num persons
         N, C, T, V, M = x.size()
-        x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
-        x = self.data_bn(x)
-        x = x.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
+        x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T) # (batch, people * nodes * channels, times)
+        x = self.data_bn(x) # batchnorm
+        x = x.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V) # (batch * people, channels, times, nodes)
         for i in range(len(self.layers)):
             x = self.layers['layer' + str(i+1)](x)
         # N*M,C,T,V
-        c_new = x.size(1)
-        x = x.view(N, M, c_new, -1)
-        x = x.mean(3).mean(1)
-        return self.fc(x)
+
+        c_new = x.size(1) # infer new channel size
+        x = x.view(N, M, c_new, -1) # (batch, people, new_channel_size, times * nodes)
+        x = x.mean(3).mean(1) # Take mean across times*nodes and people
+        return self.fc(x) # in shape: (batch, new_channel_size)

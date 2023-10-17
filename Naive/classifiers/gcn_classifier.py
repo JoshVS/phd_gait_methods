@@ -18,6 +18,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+torch.set_default_dtype(torch.double)
+
 if torch.cuda.is_available():
     device = torch.device("cuda")
 else:
@@ -68,6 +70,8 @@ class TemporalGatedConv(nn.Module):
         """
         X is shape (n, time, nodes, features)
         """
+        # TODO: Add a third dimension for certainty in dataset
+        # TODO: 
         # inp = X.permute(0, 1, 3, 2) 
         # outp_orig = torch.cat([
         #     torch.unsqueeze(self.conv(inp[:, :, :, i]), 0) for i in range(inp.shape[-1])
