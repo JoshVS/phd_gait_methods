@@ -37,7 +37,7 @@ def read_from_cached_file(filename):
     curr_data = []
     for line in lines:
         if line == "": continue
-        kp, x, y = line.split(";")
+        kp, x, y, z = line.split(";")
         curr_data.append([kp, float(x), float(y)])
     if curr_data == []:
         return None
@@ -69,7 +69,7 @@ def get_kp_from_file(filename, kp_dict):
         if lm.pose_landmarks is not None:
             for k in kp_dict.keys():
                 v = kp_dict[k]
-                curr_frame.append([k, lm.pose_landmarks.landmark[v].x, lm.pose_landmarks.landmark[v].y])
+                curr_frame.append([k, lm.pose_landmarks.landmark[v].x, lm.pose_landmarks.landmark[v].y, lm.pose_landmarks.landmark[v].z])
                 # print(dir(lm.pose_landmarks))
                 # quit()
 

@@ -53,7 +53,7 @@ def _convert_output(model_out, as_one_hot=False, as_numpy=True):
             out = pred_classes
 
         if as_numpy:
-            out = np.array(out)
+            out = np.array(out.cpu())
         return out
 
 def to_one_hot(y):
@@ -82,7 +82,7 @@ def dim(l, check_for_error=False):
 class GraphConv(nn.Module):
     def __init__(self, in_channels, out_channels, adj, dropout=0.2):
         super(GraphConv, self).__init__()
-        self.graph_attn = nn.Parameter(adj)
+        self.graph_attn = nn.Parameter(adj).to(device)
         nn.init.constant_(self.graph_attn, 1)
         self.A = adj#torch.tensor(adj, requires_grad=False)
 
@@ -304,6 +304,7 @@ class MySTGCN(nn.Module):
         # x5 = self.FC(x4)
         # # print(x3)
         # return self.softmax(x5)
+        X = X.to(device)
         X = X.permute(0, 3, 1, 2)
 
         B, C, T, N = X.size()
@@ -344,15 +345,14 @@ class GCNClassifier():
         self.dataset = dataset
         self.X = torch.tensor(dataset.X_train).float()
         self.X_val = torch.tensor(dataset.X_val).float()
-        self.X_test = torch.tensor(dataset.X_test).float().to(device)
-        self.gso = torch.tensor(dataset.gso, dtype=torch.float)
+        self.X_test = torch.tensor(dataset.X_test).float()
+        self.gso = torch.tensor(dataset.gso, dtype=torch.float).to(device)
         self.y = torch.tensor(dataset.y_train)
         self.y_val = torch.tensor(dataset.y_val)
-        self.y_test = torch.tensor(dataset.y_test).to(device)
+        self.y_test = torch.tensor(dataset.y_test)
         self.n_features = dim(dataset.X_train)[-1] // num_dims
 
         self.n_classes = dataset.n_classes
-        self.edges = torch.tensor(dataset.edge_matrix).to(device)
         # self.adj_mat = torch.tensor(self.dataset.create_graph_shift_operator()).int()
 
 
@@ -366,7 +366,7 @@ class GCNClassifier():
         num_timesteps = self.X.shape[1]
 
         self.model = MySTGCN(self.n_classes, num_nodes, num_features, self.gso).to(device)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, weight_decay=5e-4)#, weight_decay=5e-4)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01, weight_decay=5e-4)#, weight_decay=5e-4)
         self.criterion = torch.nn.CrossEntropyLoss()
        
 
@@ -380,19 +380,23 @@ class GCNClassifier():
         # quit()
         loss = torch.tensor(0).double().to(device)#self.criterion(out, y_train)
         out_ret = None
-        for b in range(X_train.shape[0] // batch_size):
-            out = self.model(X_train[b * batch_size: (b+1) * batch_size,...].to(device))
+        for b in range(X_train.shape[0] // batch_size + 1):
+            if b >= X_train.shape[0]:
+                break
+            end = (b+1) * batch_size
+            end = end if end < X_train.shape[0] else X_train.shape[0]
+            out = self.model(X_train[b * batch_size: end,...])
             if out_ret is None:
                 out_ret = out
             else:
-                out_ret = torch.stack((out_ret, out))
-            loss += self.criterion(out, y_train[b * batch_size: (b+1) * batch_size].to(device))
+                out_ret = torch.cat((out_ret, out), dim=0)
+            loss += self.criterion(out, y_train[b * batch_size: end].to(device))
         loss /= X_train.shape[0] // batch_size
         # for p in self.model.parameters():
         #     print(p.grad)
         # quit()
         self.optimizer.zero_grad()
-        loss.backward(retain_graph=True)
+        loss.backward()
         self.optimizer.step()
         return loss, _convert_output(out_ret, as_one_hot=True)
     
@@ -402,13 +406,13 @@ class GCNClassifier():
         for epoch in range(1, epochs + 1):
             loss, out = self._train(batch_size=batch_size)
             
-            val_message = " || Train: "
+            val_message = "\n||\tTrain:\t\t "
             val_metrics = [f"{x}: {y(y_train, out):.3f}" for x, y in TRACKED_METRICS]
             val_message += " | ".join(val_metrics)
             if val_set is not None:
                 X_val, y_val = val_set
                 out = self.model.predict(X_val, as_one_hot=True)
-                val_message += " || Validation: "
+                val_message += "\n||\tValidation:\t "
                 val_metrics = [f"{x}: {y(y_val, out):.3f}" for x, y in TRACKED_METRICS]
                 val_message += " | ".join(val_metrics)
 
@@ -436,7 +440,7 @@ class GCNClassifier():
         return test_acc
     
     def generate_test_set_results(self):
-        self.train(1000, batch_size=None, val_set=(self.X_val, self.y_val))
+        self.train(1000, batch_size=16, val_set=(self.X_val, self.y_val))
         acc = self.test()
         print(f"Accuracy: {acc:.2f}")
 
