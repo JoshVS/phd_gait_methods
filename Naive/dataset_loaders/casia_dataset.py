@@ -94,8 +94,9 @@ def write_to_file(filename, kps):
 
 class CASIADataset(GenericGaitDataset):
 
-    def __init__(self, directory='../../../Datasets/CASIA/DatasetB-2/video/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.3):
+    def __init__(self, directory='../../../Datasets/CASIA/DatasetB-2/video/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3):
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
+        self.val_split = val_split
         self.test_split = test_split
         self.initialise_stuff()
 
@@ -173,6 +174,7 @@ class CASIADataset(GenericGaitDataset):
         # print(dim(self.y))
         # quit()
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y, test_size=self.test_split)
+        self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X_train, self.y_train, test_size=self.val_split)
 
     def scaling_vector(self):
         for i in range(len(self.X)):

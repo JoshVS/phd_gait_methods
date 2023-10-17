@@ -6,6 +6,8 @@ import torch
 # from torch_geometric.nn import GCNConv
 import torch.nn.functional as F
 
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+
 import torch_geometric as G
 from sklearn.metrics import confusion_matrix
 
@@ -25,13 +27,34 @@ if torch.cuda.is_available():
     device = torch.device("cuda")
 else:
     device = torch.device("cpu")
-
+import warnings
+warnings.filterwarnings('always')
 ORIG_TIME_CHANNELS = 128
 SPACE_CHANNELS = 64
 
 TIME_CHANNELS = ORIG_TIME_CHANNELS // 2
 
+TRACKED_METRICS = [
+    ("Accuracy", accuracy_score),
+    ("Precision", lambda x, y: precision_score(x, y,  average='macro', zero_division= 0.0)),
+    ("Recall", lambda x, y: recall_score(x, y,  average='macro', zero_division= 0.0))
+]
 
+
+def _convert_output(model_out, as_one_hot=False, as_numpy=True):
+    with torch.no_grad():
+        pred_classes = torch.argmax(model_out, 1)
+        if as_one_hot:
+            out = torch.zeros_like(model_out, dtype=torch.int)
+            for p in range(pred_classes.shape[0]):
+                out[p, pred_classes[p]] = 1
+
+        else:
+            out = pred_classes
+
+        if as_numpy:
+            out = np.array(out)
+        return out
 
 def to_one_hot(y):
     n_c = len(np.unique(y))
@@ -61,7 +84,7 @@ class GraphConv(nn.Module):
         super(GraphConv, self).__init__()
         self.graph_attn = nn.Parameter(adj)
         nn.init.constant_(self.graph_attn, 1)
-        self.A = torch.tensor(adj, requires_grad=False)
+        self.A = adj#torch.tensor(adj, requires_grad=False)
 
         # Create Convolutions for each neighbourhood
         self.num_subset = adj.shape[0]
@@ -264,6 +287,7 @@ class MySTGCN(nn.Module):
         self.layers = nn.ModuleDict(layer_dict)
 
         self.class_layer = nn.Linear(prev_block, classes)
+        self.softmax = nn.Softmax(1)
 
 
 
@@ -292,7 +316,16 @@ class MySTGCN(nn.Module):
         c_new = x.size(1)
         x = x.view(B, c_new, -1)
         x = x.mean(2)
-        return self.class_layer(x)
+        return self.softmax(self.class_layer(x))
+    
+    def predict(self, X, as_one_hot=False, as_numpy=True):
+        with torch.no_grad():
+            model_out = self.forward(X)
+            return _convert_output(model_out, as_one_hot=as_one_hot, as_numpy=as_numpy)
+        
+
+
+        
 
 
 
@@ -310,9 +343,11 @@ class GCNClassifier():
     def __init__(self, dataset, num_dims=3, num_phases=4):
         self.dataset = dataset
         self.X = torch.tensor(dataset.X_train).float()
+        self.X_val = torch.tensor(dataset.X_val).float()
         self.X_test = torch.tensor(dataset.X_test).float().to(device)
         self.gso = torch.tensor(dataset.gso, dtype=torch.float)
         self.y = torch.tensor(dataset.y_train)
+        self.y_val = torch.tensor(dataset.y_val)
         self.y_test = torch.tensor(dataset.y_test).to(device)
         self.n_features = dim(dataset.X_train)[-1] // num_dims
 
@@ -331,19 +366,26 @@ class GCNClassifier():
         num_timesteps = self.X.shape[1]
 
         self.model = MySTGCN(self.n_classes, num_nodes, num_features, self.gso).to(device)
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=0.05, weight_decay=5e-4)#, weight_decay=5e-4)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, weight_decay=5e-4)#, weight_decay=5e-4)
         self.criterion = torch.nn.CrossEntropyLoss()
        
 
-    def _train(self, X_train=None, y_train=None, batch_size=16):
+    def _train(self, X_train=None, y_train=None, batch_size=None):
         if X_train is None:
             X_train = self.X
             y_train = self.y
+        if batch_size is None:
+            batch_size = X_train.shape[0]
         # print(y_train.shape)
         # quit()
         loss = torch.tensor(0).double().to(device)#self.criterion(out, y_train)
+        out_ret = None
         for b in range(X_train.shape[0] // batch_size):
             out = self.model(X_train[b * batch_size: (b+1) * batch_size,...].to(device))
+            if out_ret is None:
+                out_ret = out
+            else:
+                out_ret = torch.stack((out_ret, out))
             loss += self.criterion(out, y_train[b * batch_size: (b+1) * batch_size].to(device))
         loss /= X_train.shape[0] // batch_size
         # for p in self.model.parameters():
@@ -352,12 +394,28 @@ class GCNClassifier():
         self.optimizer.zero_grad()
         loss.backward(retain_graph=True)
         self.optimizer.step()
-        return loss
+        return loss, _convert_output(out_ret, as_one_hot=True)
     
-    def train(self, epochs, X_train=None, y_train=None):
+    def train(self, epochs, X_train=None, y_train=None, val_set=None, batch_size=None):
+        if y_train is None:
+            y_train = self.y
         for epoch in range(1, epochs + 1):
-            loss = self._train()
-            print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}')
+            loss, out = self._train(batch_size=batch_size)
+            
+            val_message = " || Train: "
+            val_metrics = [f"{x}: {y(y_train, out):.3f}" for x, y in TRACKED_METRICS]
+            val_message += " | ".join(val_metrics)
+            if val_set is not None:
+                X_val, y_val = val_set
+                out = self.model.predict(X_val, as_one_hot=True)
+                val_message += " || Validation: "
+                val_metrics = [f"{x}: {y(y_val, out):.3f}" for x, y in TRACKED_METRICS]
+                val_message += " | ".join(val_metrics)
+
+                
+            print("===============================")
+            print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}' + val_message)
+            print("===============================")
 
     def test(self):
         self.model.eval()
@@ -378,7 +436,7 @@ class GCNClassifier():
         return test_acc
     
     def generate_test_set_results(self):
-        self.train(1000)
+        self.train(1000, batch_size=None, val_set=(self.X_val, self.y_val))
         acc = self.test()
         print(f"Accuracy: {acc:.2f}")
 
