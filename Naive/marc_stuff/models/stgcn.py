@@ -85,9 +85,10 @@ class GraphConvolution(nn.Module):
 
             # Find nodes for this neighbourhood
             # x_a: (batch, time * channel, nodes)
-            # A[i]: 
+            # A[i]: (nodes)
 
             # output: (batch, channel, time, nodes)
+            # Effect: applies normalisation
             z = self.g_conv[i](torch.matmul(x_a, A[i]).view(N, C, T, V))
             hidden_ = z + hidden_ if hidden_ is not None else z
         hidden_ = self.bn(hidden_)

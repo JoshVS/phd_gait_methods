@@ -187,23 +187,29 @@ class CASIADataset(GenericGaitDataset):
 
 
     def normalize_gso(self, gso):
-        node_degrees = np.sum(gso, 0)
-        w = gso.shape[1]
+        Ident_mat = np.identity(gso.shape[1], dtype=np.float32)
+        In = self._norm(gso)
+        Out = self._norm(gso[::-1, ::-1])
+        return np.stack((Ident_mat, In, Out))
+
+
+    
+    def _norm(self, X):
+        node_degrees = np.sum(X, 0)
+        w = X.shape[1]
         degree_to_normalize = np.zeros((w, w))
         for i in range(w):
             if node_degrees[i] > 0:
                 degree_to_normalize[i,i] = node_degrees[i]**-1
-        return np.dot(gso, degree_to_normalize)
+        return np.dot(X, degree_to_normalize)
+
 
     def create_graph_shift_operator(self):
         gso = np.zeros((self.X.shape[-2], self.X.shape[-2]))
         for i in range(len(self.edge_matrix[0])):
             ind1 = self.edge_matrix[0][i]
             ind2 = self.edge_matrix[1][i]
-            gso[ind1, ind1] = 1
-            gso[ind2, ind2] = 1
             gso[ind1, ind2] = 1
-            gso[ind2, ind1] = 1
         # gso = np.empty((len(self.edge_matrix[0]), len(self.edge_matrix)))
         # for i in range(gso.shape[0]):
         #     gso[i, 0] = self.edge_matrix[0][i]
