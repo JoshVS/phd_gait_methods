@@ -35,13 +35,15 @@ def read_from_cached_file(filename):
     with open(filename, 'r') as in_file:
         lines = in_file.read().split("\n")
     curr_data = []
+    z_data = []
     for line in lines:
         if line == "": continue
         kp, x, y, z = line.split(";")
         curr_data.append([kp, float(x), float(y)])
+        z_data.append([float(z)])
     if curr_data == []:
         return None
-    return curr_data
+    return curr_data, z_data
     
         
 
@@ -101,7 +103,7 @@ class CASIADataset(GenericGaitDataset):
         self.initialise_stuff()
 
     def initialise_stuff(self):
-        self.skel_data, self.kp_indices = self._get_file_data(self.max_samples) # (n_people, n_files, n_lines, 3)
+        self.skel_data, self.kp_indices, self.z_data = self._get_file_data(self.max_samples) # (n_people, n_files, n_lines, 3)
         
 
         self.setup_information()
@@ -145,6 +147,9 @@ class CASIADataset(GenericGaitDataset):
         self.y_raw = self.y.copy()
         # self.y = self.to_one_hot()
         # self.X = self.get_position_vectors()
+        print(self.X.shape)
+        print(dim(self.z_data))
+        quit()
         self.split_train_and_test()
         self.gso = self.normalize_gso(self.create_graph_shift_operator())
 
@@ -325,6 +330,7 @@ class CASIADataset(GenericGaitDataset):
         # Need skeleton to be shape (vid_seq, frame, keypoints, 2)
         labels = []
         reshaped_skel = []
+        reshaped_z_data = []
         for i, person in enumerate(self.skel_data):
             # reshaped_skel.append([])
             for f in person:
@@ -366,6 +372,7 @@ class CASIADataset(GenericGaitDataset):
         # return videos, kp_dict
         classes = []
         videos = []
+        z_data = []
         vid_filenames = []
         person_id = 1
         def create_person_string(p_id):
@@ -389,6 +396,7 @@ class CASIADataset(GenericGaitDataset):
                 list_of_files = list_of_files[:int(max_samples)]
             classes.append(person_id)
             class_vids = []
+            z_class_vids = []
             class_vid_filenames = []
 
             loop = tqdm(list_of_files)
@@ -397,9 +405,10 @@ class CASIADataset(GenericGaitDataset):
 
             for i, vid in enumerate(loop):
                 if os.path.exists(f"cached/{p_string}/{vid}.txt"):
-                    to_append = read_from_cached_file(f"cached/{p_string}/{vid}.txt")
+                    to_append, z_data = read_from_cached_file(f"cached/{p_string}/{vid}.txt")
                     if to_append is not None:
                         class_vids.append(to_append)
+                        z_class_vids.append(z_data)
                         vid_filenames.append(os.path.join(self.directory, vid))
                 else:
                     print(f"File cached/{p_string}/{vid}.txt doesn't exist, creating")
@@ -409,6 +418,7 @@ class CASIADataset(GenericGaitDataset):
                     vid_filenames.append(filename)
                     write_to_file(f"cached/{p_string}/{vid}.txt", c)
             videos.append(class_vids)
+            z_data.append(z_class_vids)
 
 
             person_id += 1
@@ -417,7 +427,7 @@ class CASIADataset(GenericGaitDataset):
 
         self.video_filenames = vid_filenames
         self.classes = classes
-        return videos, kp_dict
+        return videos, kp_dict, z_data
             
 
     def _get_file_data(self, max_samples):
