@@ -8,19 +8,8 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from graphs.mpg import MediapipeGraph
-from torch.utils.data import DataLoader
 
 torch.set_default_dtype(torch.double)
-
-
-
-# class DataLoader(DataLoader), batch_size=batch_size:
-#     def __init__(self, ds, **kwargs):
-#         self.ds = ds
-#         self.n_classes = ds.n_classes
-#         self.in_edge = ds.in_edge
-#         self.n_point = ds.n_point
-#         super().__init__(ds, **kwargs)
 
 
 
@@ -52,7 +41,7 @@ class GraphConvolution(nn.Module):
         self.cuda_ = cuda_
         self.graph_attn = nn.Parameter(torch.from_numpy(A.astype(np.float32))) #graph_attn is the neighbourhoods - how is it represented?
         nn.init.constant_(self.graph_attn, 1)
-        self.A = Variable(torch.from_numpy(A.astype(np.float64)), requires_grad=False)
+        self.A = Variable(torch.from_numpy(A.astype(np.float32)), requires_grad=False)
 
         # Create Convolutions for each neighbourhood
         self.num_subset = 3 # number of neighbourhoods
@@ -150,15 +139,14 @@ class ST_GCN_block(nn.Module):
         return self.relu(x)
 
 
-class MarcSTGCN(nn.Module):
-    def __init__(self, num_class, num_point, num_person, in_channels, graph, cuda_=False):
-        super(MarcSTGCN, self).__init__()
+class STGCN(nn.Module):
+    def __init__(self, num_class, num_point, num_person, in_channels, graph_type, cuda_=False):
+        super(STGCN, self).__init__()
 
-        self.graph = graph
+        self.graph = MediapipeGraph()
 
         A = self.graph.A
         self.data_bn = nn.BatchNorm1d(num_person * in_channels * num_point)
-
         weights_init(self.data_bn, bs=1)
 
         self.layers = nn.ModuleDict(
@@ -182,10 +170,8 @@ class MarcSTGCN(nn.Module):
         X: Shape (batch, channels, time, nodes, people)
         """
         # n -> batch size, C -> channels 3, T -> num frames, V -> num joints, M -> num persons
-      
         N, C, T, V, M = x.size()
         x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T) # (batch, people * nodes * channels, times)
-        
         x = self.data_bn(x) # batchnorm
         x = x.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V) # (batch * people, channels, times, nodes)
         for i in range(len(self.layers)):
@@ -196,64 +182,3 @@ class MarcSTGCN(nn.Module):
         x = x.view(N, M, c_new, -1) # (batch, people, new_channel_size, times * nodes)
         x = x.mean(3).mean(1) # Take mean across times*nodes and people
         return self.fc(x) # in shape: (batch, new_channel_size)
-
-class STGCN:
-    def __init__(self, ds, loss_fn=torch.nn.CrossEntropyLoss()):
-        dsiter = iter(ds)
-        self.ds = ds
-        self.n_classes = ds.n_classes
-        self.n_point = ds.n_point
-        self.num_person = 1
-        self.in_channels = 2
-        self.loss_fn = loss_fn
-
-        self.graph = MediapipeGraph(self.n_point, ds.in_edge)
-
-        self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph)
-        
-        self.train()
-        # print(train_data.dtype)
-        # quit()
-
-        
-    def _train_step(self, sample, optimizer):
-        X, y = sample
-        outputs = self.classifier(X)
-        loss = self.loss_fn(outputs, y)
-
-        loss.backward()
-
-        optimizer.step()
-        print(loss)
-
-    def train(self, test_split=0.3, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=100, batch_size=1):
-        train_samples = int((1 - test_split) * len(self.ds))
-        test_samples = int(len(self.ds) - train_samples)
-        val_samples = int(val_split * train_samples)
-        train_samples = int(train_samples - val_samples)
-        self.train_set, self.test_set, self.val_set = torch.utils.data.random_split(self.ds, [train_samples, test_samples, val_samples])
-
-        # quit()
-        self.train_set = DataLoader(self.train_set, batch_size=batch_size)
-
-
-
-        if optimizer is None:
-            optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
-
-
-        # for epoch in range(epochs):
-        #     train_iter = iter(self.train_set)
-        #     curr_sample = next(train_iter)
-        #     while curr_sample is not None:
-        #         self._train_step(curr_sample, optimizer)
-        #         curr_sample = next(train_iter)
-
-
-        for epoch in range(epochs):
-            train_iter = iter(self.train_set)
-            for idx, curr_sample in enumerate(train_iter):
-                self._train_step(curr_sample, optimizer)
-                curr_sample = next(train_iter)
-
-

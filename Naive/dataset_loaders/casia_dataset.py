@@ -7,7 +7,7 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from .genericdataset import GenericGaitDataset
 
-
+import torch
 from scipy.interpolate import interp1d
 # matplotlib.use('TkAgg')
 np.seterr(all='raise')
@@ -103,18 +103,20 @@ class CASIADataset(GenericGaitDataset):
         self.initialise_stuff()
 
     def initialise_stuff(self):
-        self.skel_data, self.kp_indices, self.z_data = self._get_file_data(self.max_samples) # (n_people, n_files, n_lines, 3)
+        self.skel_data, self.kp_indices, self.labels = self._get_file_data(self.max_samples) # (n_people, n_files, n_lines, 3)
         
-
+        
+        
+        
         self.setup_information()
+
         self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
+        
         
         self.X, self.labels = self.reshape_skeletons()
         
         
-        
         self.y  = self.labels
-
 
 
         self.translation_vector()
@@ -147,9 +149,7 @@ class CASIADataset(GenericGaitDataset):
         self.y_raw = self.y.copy()
         # self.y = self.to_one_hot()
         # self.X = self.get_position_vectors()
-        print(self.X.shape)
-        print(dim(self.z_data))
-        quit()
+        self.X = self.adjust_input_data(self.X)
         self.split_train_and_test()
         self.gso = self.normalize_gso(self.create_graph_shift_operator())
 
@@ -173,7 +173,7 @@ class CASIADataset(GenericGaitDataset):
             ynew = f(xnew)
             self.X[i] = ynew
         if convert_to_numpy:
-            self.X = np.array(self.X)
+            self.X = np.array(self.X, dtype=np.double)
 
     def split_train_and_test(self):
         # print(dim(self.y))
@@ -229,6 +229,8 @@ class CASIADataset(GenericGaitDataset):
         for u in self.upper_torso:
             upper_limbs.append(X[self.kp_indices[u]])
         # uc = [sum(upper_limbs[x::self.num_dims]) / len(self.upper_torso) for x in range(self.num_dims)]
+        # print(upper_limbs)
+        # quit()
         uc = np.einsum("ij-> j", upper_limbs)
       
 
@@ -405,10 +407,14 @@ class CASIADataset(GenericGaitDataset):
 
             for i, vid in enumerate(loop):
                 if os.path.exists(f"cached/{p_string}/{vid}.txt"):
-                    to_append, z_data = read_from_cached_file(f"cached/{p_string}/{vid}.txt")
+                    to_append, z_datum = read_from_cached_file(f"cached/{p_string}/{vid}.txt")
+                    to_append = [[a, b, c, d[0]] for ((a, b, c), (d)) in zip(to_append, z_datum)]
+                    # to_append = np.concatenate((to_append, z_datum), axis=1)
+                  
+                    # quit()
                     if to_append is not None:
                         class_vids.append(to_append)
-                        z_class_vids.append(z_data)
+                        z_class_vids.append(z_datum)
                         vid_filenames.append(os.path.join(self.directory, vid))
                 else:
                     print(f"File cached/{p_string}/{vid}.txt doesn't exist, creating")
@@ -427,7 +433,7 @@ class CASIADataset(GenericGaitDataset):
 
         self.video_filenames = vid_filenames
         self.classes = classes
-        return videos, kp_dict, z_data
+        return videos, kp_dict, classes
             
 
     def _get_file_data(self, max_samples):
@@ -520,6 +526,10 @@ class CASIADataset(GenericGaitDataset):
         ]
 
         self.edge_matrix = [[self.kp_indices[x] for x, _ in self.connections], [self.kp_indices[y] for _, y in self.connections]]
+        self.in_edge = [
+            (self.kp_indices[x], self.kp_indices[y])
+            for (x, y) in self.connections
+        ]        
 
         self.upper_torso = [
             "nose",
@@ -556,3 +566,16 @@ class CASIADataset(GenericGaitDataset):
         
 
         
+
+    def adjust_input_data(self, X):
+        X = X[...,:-1] # Remove Z Dimension
+        X = X.reshape(X.shape + (1,))
+        # print(X.shape)
+        N = 0
+        C = 3
+        T = 1
+        V = 2
+        M = 4
+        X = X.transpose(N, C, T, V, M)
+        # print(X.shape)
+        return torch.tensor(X, dtype=torch.double)
