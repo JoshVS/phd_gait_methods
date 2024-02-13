@@ -217,6 +217,7 @@ class STGCN:
 
         
     def _train_step(self, sample, optimizer):
+        metrics = {}
         X, y = sample
         outputs = self.classifier(X)
         loss = self.loss_fn(outputs, y)
@@ -224,7 +225,8 @@ class STGCN:
         loss.backward()
 
         optimizer.step()
-        print(loss)
+        metrics['loss'] = loss.item()
+        return metrics
 
     def train(self, test_split=0.3, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=100, batch_size=1):
         train_samples = int((1 - test_split) * len(self.ds))
@@ -252,8 +254,16 @@ class STGCN:
 
         for epoch in range(epochs):
             train_iter = iter(self.train_set)
+            metrics = {}
             for idx, curr_sample in enumerate(train_iter):
-                self._train_step(curr_sample, optimizer)
+                train_metrics = self._train_step(curr_sample, optimizer)
+                for k in train_metrics.keys():
+                    train_metrics[k] = train_metrics[k] / len(train_iter)
                 curr_sample = next(train_iter)
+                metrics = train_metrics
+            
+            for k in metrics.keys():
+                v = metrics[k]
+                print(f"{k.capitalize()}: {v:.2f}")
 
 
