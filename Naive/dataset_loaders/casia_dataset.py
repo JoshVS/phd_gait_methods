@@ -17,6 +17,15 @@ from sklearn.ensemble import RandomForestClassifier
 import mediapipe as mp
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+
+
+
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+
+
 def _dim(l, check_for_error):
     if type(l) != list and type(l) != np.ndarray:
         return []
@@ -407,12 +416,18 @@ class CASIADataset(GenericGaitDataset):
 
             for i, vid in enumerate(loop):
                 if os.path.exists(f"cached/{p_string}/{vid}.txt"):
-                    to_append, z_datum = read_from_cached_file(f"cached/{p_string}/{vid}.txt")
-                    to_append = [[a, b, c, d[0]] for ((a, b, c), (d)) in zip(to_append, z_datum)]
+                    # to_append, z_datum = read_from_cached_file(f"cached/{p_string}/{vid}.txt")
+                    ret_val = read_from_cached_file(f"cached/{p_string}/{vid}.txt")
+                    # if ret_val is None:
+                    #     continue
+                    # to_append, z_datum = ret_val
+                    # to_append = [[a, b, c, d[0]] for ((a, b, c), (d)) in zip(to_append, z_datum)]
                     # to_append = np.concatenate((to_append, z_datum), axis=1)
                   
                     # quit()
-                    if to_append is not None:
+                    if ret_val is not None:
+                        to_append, z_datum = ret_val
+                        to_append = [[a, b, c, d[0]] for ((a, b, c), (d)) in zip(to_append, z_datum)]
                         class_vids.append(to_append)
                         z_class_vids.append(z_datum)
                         vid_filenames.append(os.path.join(self.directory, vid))
@@ -578,4 +593,4 @@ class CASIADataset(GenericGaitDataset):
         M = 4
         X = X.transpose(N, C, T, V, M)
         # print(X.shape)
-        return torch.tensor(X, dtype=torch.double)
+        return torch.tensor(X, dtype=torch.double).to(device=device)

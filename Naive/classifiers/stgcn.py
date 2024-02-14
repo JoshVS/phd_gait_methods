@@ -9,20 +9,12 @@ import torch.nn as nn
 from torch.autograd import Variable
 from graphs.mpg import MediapipeGraph
 from torch.utils.data import DataLoader
-
+from tqdm import tqdm
+from sklearn.metrics import precision_score
+from torchmetrics.functional import precision, recall
 torch.set_default_dtype(torch.double)
 
-
-
-# class DataLoader(DataLoader), batch_size=batch_size:
-#     def __init__(self, ds, **kwargs):
-#         self.ds = ds
-#         self.n_classes = ds.n_classes
-#         self.in_edge = ds.in_edge
-#         self.n_point = ds.n_point
-#         super().__init__(ds, **kwargs)
-
-
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Hi Josh, 
 
@@ -151,7 +143,7 @@ class ST_GCN_block(nn.Module):
 
 
 class MarcSTGCN(nn.Module):
-    def __init__(self, num_class, num_point, num_person, in_channels, graph, cuda_=False):
+    def __init__(self, num_class, num_point, num_person, in_channels, graph, cuda_=torch.cuda.is_available()):
         super(MarcSTGCN, self).__init__()
 
         self.graph = graph
@@ -209,26 +201,36 @@ class STGCN:
 
         self.graph = MediapipeGraph(self.n_point, ds.in_edge)
 
-        self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph)
-        
+        self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph).to(device)
+        self.tracking_metrics = {
+            "precision": lambda x,y: precision(x, y, 'multiclass', num_classes=self.n_classes),
+            "recall": lambda x,y: recall(x, y, 'multiclass', num_classes=self.n_classes),
+        }
         self.train()
         # print(train_data.dtype)
         # quit()
 
         
+    
+
     def _train_step(self, sample, optimizer):
         metrics = {}
         X, y = sample
+        y = y.to(device)
+        optimizer.zero_grad()
         outputs = self.classifier(X)
+        predictions = torch.nn.functional.one_hot(outputs.argmax(axis=1), num_classes=self.n_classes)
         loss = self.loss_fn(outputs, y)
 
         loss.backward()
 
         optimizer.step()
         metrics['loss'] = loss.item()
+        for k in self.tracking_metrics.keys():
+            metrics[k] = self.tracking_metrics[k](predictions, y).item()
         return metrics
 
-    def train(self, test_split=0.3, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=100, batch_size=1):
+    def train(self, test_split=0.3, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=100, batch_size=4):
         train_samples = int((1 - test_split) * len(self.ds))
         test_samples = int(len(self.ds) - train_samples)
         val_samples = int(val_split * train_samples)
@@ -251,16 +253,19 @@ class STGCN:
         #         self._train_step(curr_sample, optimizer)
         #         curr_sample = next(train_iter)
 
-
+        print("Training")
+        print()
         for epoch in range(epochs):
-            train_iter = iter(self.train_set)
+            print(f"Epoch #{epoch}: ")
+            train_iter = tqdm(iter(self.train_set))
             metrics = {}
             for idx, curr_sample in enumerate(train_iter):
                 train_metrics = self._train_step(curr_sample, optimizer)
                 for k in train_metrics.keys():
-                    train_metrics[k] = train_metrics[k] / len(train_iter)
-                curr_sample = next(train_iter)
-                metrics = train_metrics
+                    if k not in metrics.keys():
+                        metrics[k] = 0
+                    metrics[k] += train_metrics[k] / len(train_iter)
+                train_iter.set_postfix(train_metrics)
             
             for k in metrics.keys():
                 v = metrics[k]
