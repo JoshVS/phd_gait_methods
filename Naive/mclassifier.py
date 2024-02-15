@@ -18,6 +18,6 @@ class CASIATorchDataset(Dataset):
         return self.X[idx], self.y[idx]
 
 
-ds = CASIATorchDataset(CASIADataset(generate_test_video=None, max_samples=0.75))
+ds = CASIATorchDataset(CASIADataset(generate_test_video=None, max_samples=300))
 # print(dsiter.next())
 classifier = STGCN(ds)

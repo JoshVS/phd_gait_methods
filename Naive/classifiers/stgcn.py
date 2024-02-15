@@ -12,10 +12,18 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from sklearn.metrics import precision_score
 from torchmetrics.functional import precision, recall
+from torch.utils.tensorboard import SummaryWriter
 torch.set_default_dtype(torch.double)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+
+def force_cudnn_initialization():
+    s = 32
+    dev = torch.device('cuda')
+    torch.nn.functional.conv2d(torch.zeros(s, s, s, s, device=dev), torch.zeros(s, s, s, s, device=dev))
+
+force_cudnn_initialization()
 # Hi Josh, 
 
 # Please find attached model code for the stgcn model as well as the graph creation class for mediapipe. 
@@ -230,7 +238,7 @@ class STGCN:
             metrics[k] = self.tracking_metrics[k](predictions, y).item()
         return metrics
 
-    def train(self, test_split=0.3, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=100, batch_size=4):
+    def train(self, test_split=0.3, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=100, batch_size=32):
         train_samples = int((1 - test_split) * len(self.ds))
         test_samples = int(len(self.ds) - train_samples)
         val_samples = int(val_split * train_samples)
@@ -245,6 +253,7 @@ class STGCN:
         if optimizer is None:
             optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
 
+        writer = SummaryWriter()
 
         # for epoch in range(epochs):
         #     train_iter = iter(self.train_set)
@@ -254,8 +263,8 @@ class STGCN:
         #         curr_sample = next(train_iter)
 
         print("Training")
-        print()
         for epoch in range(epochs):
+            print()
             print(f"Epoch #{epoch}: ")
             train_iter = tqdm(iter(self.train_set))
             metrics = {}
@@ -270,5 +279,6 @@ class STGCN:
             for k in metrics.keys():
                 v = metrics[k]
                 print(f"{k.capitalize()}: {v:.2f}")
+                writer.add_scalar(k.capitalize(), v, epoch)
 
 

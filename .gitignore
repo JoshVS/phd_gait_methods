@@ -9,6 +9,8 @@ __pycache__/
 *.yaml
 *latest-run*
 
+*events*
+
 KinectDataset/
 logs/
 
