@@ -221,8 +221,11 @@ class STGCN:
         
     
 
-    def _train_step(self, sample, optimizer):
+    def _train_step(self, sample, optimizer, val_sample=None):
         metrics = {}
+        if val_sample is not None:
+            val_metrics = {}
+        val_metrics = {}
         X, y = sample
         y = y.to(device)
         optimizer.zero_grad()
@@ -236,22 +239,50 @@ class STGCN:
         metrics['loss'] = loss.item()
         for k in self.tracking_metrics.keys():
             metrics[k] = self.tracking_metrics[k](predictions, y).item()
+        if val_sample is not None:
+            val_X, val_y = val_sample
+            with torch.no_grad():
+                val_outputs = self.classifier(val_X)
+                val_loss = self.loss_fn(val_outputs, val_y.to(device))
+                metrics["val_loss"] = val_loss.item()
+                for k in self.tracking_metrics.keys():
+                    val_metrics["val_" + k] = self.tracking_metrics[k](val_outputs, val_y.to(device)).item()
+                    metrics["val_" + k] = self.tracking_metrics[k](val_outputs, val_y.to(device)).item()
+                    
         return metrics
 
-    def train(self, test_split=0.3, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=100, batch_size=32):
+    def _val_step(self, sample):
+        val_metrics = {}
+        X, y = sample
+        y = y.to(device)
+        
+        with torch.no_grad():
+            val_out = self.classifier(X)
+            predictions = torch.nn.functional.one_hot(val_out.argmax(axis=1), num_classes=self.n_classes)
+            val_loss = self.loss_fn(val_out, y)
+            val_metrics["val_loss"] = val_loss.item()
+            for k in self.tracking_metrics.keys():
+                val_metrics["val_" + k] = self.tracking_metrics[k](predictions, y).item()
+        return val_metrics
+
+
+    def train(self, test_split=0.3, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=100, batch_size=64):
         train_samples = int((1 - test_split) * len(self.ds))
         test_samples = int(len(self.ds) - train_samples)
         val_samples = int(val_split * train_samples)
         train_samples = int(train_samples - val_samples)
         self.train_set, self.test_set, self.val_set = torch.utils.data.random_split(self.ds, [train_samples, test_samples, val_samples])
+        # self.val_set = self.val_set.to(device)
 
         # quit()
         self.train_set = DataLoader(self.train_set, batch_size=batch_size)
+        self.val_set = DataLoader(self.val_set, batch_size=batch_size)
 
 
 
         if optimizer is None:
-            optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
+            # optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-5)
 
         writer = SummaryWriter()
 
@@ -275,10 +306,23 @@ class STGCN:
                         metrics[k] = 0
                     metrics[k] += train_metrics[k] / len(train_iter)
                 train_iter.set_postfix(train_metrics)
+                
+            print()
+            print("Validation:")
+            val_iter = tqdm(iter(self.val_set))
+            for idx, val_sample in enumerate(val_iter):
+                val_metrics = self._val_step(val_sample)
+                for k in val_metrics.keys():
+                    if k not in metrics.keys():
+                        metrics[k] = 0
+                    metrics[k] += val_metrics[k] / len(val_iter)
+                val_iter.set_postfix(val_metrics)
+                
+
             
             for k in metrics.keys():
                 v = metrics[k]
-                print(f"{k.capitalize()}: {v:.2f}")
+                print(f"{k.capitalize()}: {v:.3f}")
                 writer.add_scalar(k.capitalize(), v, epoch)
 
 
