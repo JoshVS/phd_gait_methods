@@ -166,12 +166,12 @@ class MarcSTGCN(nn.Module):
 
         self.layers = nn.ModuleDict(
             {'layer1': ST_GCN_block(in_channels, 64, A, cuda_, residual=False),
-             'layer2': ST_GCN_block(64, 64, A, cuda_),
-             'layer3': ST_GCN_block(64, 64, A, cuda_),
+            #  'layer2': ST_GCN_block(64, 64, A, cuda_),
+            #  'layer3': ST_GCN_block(64, 64, A, cuda_),
              'layer4': ST_GCN_block(64, 64, A, cuda_),
              'layer5': ST_GCN_block(64, 128, A, cuda_, stride=2),
-             'layer6': ST_GCN_block(128, 128, A, cuda_),
-             'layer7': ST_GCN_block(128, 128, A, cuda_),
+            #  'layer6': ST_GCN_block(128, 128, A, cuda_),
+            #  'layer7': ST_GCN_block(128, 128, A, cuda_),
              'layer8': ST_GCN_block(128, 256, A, cuda_, stride=2),
             #  'layer9': ST_GCN_block(256, 256, A, cuda_),
             #  'layer10': ST_GCN_block(256, 256, A, cuda_)
@@ -279,7 +279,7 @@ class STGCN:
         return val_metrics
 
 
-    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=1000, batch_size=64):
+    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=1000, batch_size=32):
         # train_samples = int((1 - test_split) * len(self.ds))
         # test_samples = int(len(self.ds) - train_samples)
         # val_samples = int(val_split * train_samples)
