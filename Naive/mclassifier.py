@@ -26,6 +26,8 @@ class TrainValDataset(Dataset):
         self.n_point = ds.X.shape[3]
         self.X = X
         self.y = y
+        # print(X.size()[2])
+        # quit()
 
     
     def __len__(self):

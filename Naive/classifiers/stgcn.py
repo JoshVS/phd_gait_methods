@@ -15,6 +15,7 @@ from torchmetrics.functional import precision, recall
 from torch.utils.tensorboard import SummaryWriter
 import seaborn as sns
 import matplotlib.pyplot as plt
+from torch.nn.functional import softmax
 torch.set_default_dtype(torch.double)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -197,11 +198,12 @@ class MarcSTGCN(nn.Module):
         c_new = x.size(1) # infer new channel size
         x = x.view(N, M, c_new, -1) # (batch, people, new_channel_size, times * nodes)
         x = x.mean(3).mean(1) # Take mean across times*nodes and people
-        return self.fc(x) # in shape: (batch, new_channel_size)
+        return softmax(self.fc(x), dim=1) # in shape: (batch, new_channel_size)
 
 class STGCN:
     def __init__(self, ds, loss_fn=torch.nn.CrossEntropyLoss()):
         self.train_set, self.test_set, self.val_set = ds
+        self.time_steps = self.train_set.X.size()[2]
         ds = self.train_set
         self.n_classes = ds.n_classes
         self.n_point = ds.n_point
@@ -239,8 +241,8 @@ class STGCN:
         optimizer.step()
         metrics["scalar"]['loss'] = loss.item()
         for k in self.tracking_metrics.keys():
-            metrics["scalar"][k] = self.tracking_metrics[k](predictions, y).item()
-        cm = confusion_matrix(predictions.cpu().numpy().argmax(axis=1), y.cpu().numpy().argmax(axis=1))
+            metrics["scalar"][k] = self.tracking_metrics[k](y, predictions).item()
+        cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1))
         if "conf_mat" not in metrics["image"].keys():
           metrics["image"]["conf_mat"] = cm
 
@@ -260,9 +262,9 @@ class STGCN:
             val_loss = self.loss_fn(val_out, y)
             val_metrics["scalar"]["val_loss"] = val_loss.item()
             for k in self.tracking_metrics.keys():
-                val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](predictions, y).item()
+                val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](y, predictions).item()
 
-        cm = confusion_matrix(predictions.cpu().numpy().argmax(axis=1), y.cpu().numpy().argmax(axis=1))
+        cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1))
         if "val_conf_mat" not in val_metrics["image"]:
             val_metrics["image"]["val_conf_mat"]  = cm
 
@@ -302,7 +304,7 @@ class STGCN:
         #         self._train_step(curr_sample, optimizer)
         #         curr_sample = next(train_iter)
 
-        print("Training")
+        print(f"Training with {self.time_steps} time steps")
         for epoch in range(epochs):
             print()
             print(f"Epoch #{epoch + 1}: ")
