@@ -173,8 +173,9 @@ class MarcSTGCN(nn.Module):
              'layer6': ST_GCN_block(128, 128, A, cuda_),
              'layer7': ST_GCN_block(128, 128, A, cuda_),
              'layer8': ST_GCN_block(128, 256, A, cuda_, stride=2),
-             'layer9': ST_GCN_block(256, 256, A, cuda_),
-             'layer10': ST_GCN_block(256, 256, A, cuda_)}
+            #  'layer9': ST_GCN_block(256, 256, A, cuda_),
+            #  'layer10': ST_GCN_block(256, 256, A, cuda_)
+             }
         )
 
         self.fc = nn.Linear(256, num_class)
@@ -198,7 +199,8 @@ class MarcSTGCN(nn.Module):
         c_new = x.size(1) # infer new channel size
         x = x.view(N, M, c_new, -1) # (batch, people, new_channel_size, times * nodes)
         x = x.mean(3).mean(1) # Take mean across times*nodes and people
-        return softmax(self.fc(x), dim=1) # in shape: (batch, new_channel_size)
+        # return softmax(self.fc(x), dim=1) # in shape: (batch, new_channel_size)
+        return self.fx(x)
 
 class STGCN:
     def __init__(self, ds, loss_fn=torch.nn.CrossEntropyLoss()):
