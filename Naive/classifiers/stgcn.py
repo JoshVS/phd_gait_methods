@@ -279,7 +279,7 @@ class STGCN:
         return val_metrics
 
 
-    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=1000, batch_size=32):
+    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=0.01, momentum=0.95, epochs=1000, batch_size=32):
         # train_samples = int((1 - test_split) * len(self.ds))
         # test_samples = int(len(self.ds) - train_samples)
         # val_samples = int(val_split * train_samples)
@@ -295,7 +295,7 @@ class STGCN:
 
         if optimizer is None:
             # optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-3)
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-4)
 
         writer = SummaryWriter()
 

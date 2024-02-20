@@ -39,7 +39,7 @@ class TrainValDataset(Dataset):
         
 
 # my_ds = CASIADataset(generate_test_video=None, max_samples=682)
-my_ds = CASIADataset(generate_test_video=None, max_samples=341)
+my_ds = CASIADataset(generate_test_video=None, max_samples=341, max_classes=3)
 # my_ds = CASIADataset(generate_test_video=None, max_samples=10)
 X_train, X_test, y_train, y_test = train_test_split(my_ds.X, my_ds.y, test_size=0.1, shuffle=True, stratify=my_ds.y)
 X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.3, shuffle=True, stratify=y_train)

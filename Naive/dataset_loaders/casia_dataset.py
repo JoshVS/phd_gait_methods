@@ -105,14 +105,15 @@ def write_to_file(filename, kps):
 
 class CASIADataset(GenericGaitDataset):
 
-    def __init__(self, directory='../../../Datasets/CASIA/DatasetB-2/video/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3):
+    def __init__(self, directory='../../../Datasets/CASIA/DatasetB-2/video/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None):
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.val_split = val_split
         self.test_split = test_split
+        self.max_classes = max_classes
         self.initialise_stuff()
 
     def initialise_stuff(self):
-        self.skel_data, self.kp_indices, self.labels = self._get_file_data(self.max_samples) # (n_people, n_files, n_lines, 3)
+        self.skel_data, self.kp_indices, self.labels = self._get_file_data(self.max_samples, self.max_classes) # (n_people, n_files, n_lines, 3)
         
         
         
@@ -353,7 +354,7 @@ class CASIADataset(GenericGaitDataset):
                     reshaped_skel[-1][-1].append(l[1:])
         return reshaped_skel, labels
 
-    def create_file_data(self, kp_dict, max_samples):
+    def create_file_data(self, kp_dict, max_samples, max_classes):
         if not os.path.exists("cached/"):
             os.makedirs("cached")
         # subdirs = os.listdir(self.directory)
@@ -443,6 +444,8 @@ class CASIADataset(GenericGaitDataset):
 
 
             person_id += 1
+            if max_classes is not None and person_id > max_classes:
+                break
             p_string = create_person_string(person_id)
             list_of_files = glob.glob(f"*-*-{p_string}-*.avi", root_dir=self.directory)
 
@@ -451,7 +454,7 @@ class CASIADataset(GenericGaitDataset):
         return videos, kp_dict, classes
             
 
-    def _get_file_data(self, max_samples):
+    def _get_file_data(self, max_samples, max_classes):
         keypoints_arr = [
             "nose",
             "left_eye_inner",
@@ -490,7 +493,7 @@ class CASIADataset(GenericGaitDataset):
         kp_dict = {}
         for i, s in enumerate(keypoints_arr):
             kp_dict[s] = i
-        return self.create_file_data(kp_dict, max_samples)
+        return self.create_file_data(kp_dict, max_samples, max_classes)
         
 
     def setup_information(self):        
