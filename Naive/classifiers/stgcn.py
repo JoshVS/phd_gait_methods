@@ -168,11 +168,11 @@ class MarcSTGCN(nn.Module):
             {'layer1': ST_GCN_block(in_channels, 64, A, cuda_, residual=False),
             #  'layer2': ST_GCN_block(64, 64, A, cuda_),
             #  'layer3': ST_GCN_block(64, 64, A, cuda_),
-             'layer4': ST_GCN_block(64, 64, A, cuda_),
-             'layer5': ST_GCN_block(64, 128, A, cuda_, stride=2),
+             'layer2': ST_GCN_block(64, 64, A, cuda_),
+             'layer3': ST_GCN_block(64, 128, A, cuda_, stride=2),
             #  'layer6': ST_GCN_block(128, 128, A, cuda_),
             #  'layer7': ST_GCN_block(128, 128, A, cuda_),
-             'layer8': ST_GCN_block(128, 256, A, cuda_, stride=2),
+             'layer4': ST_GCN_block(128, 256, A, cuda_, stride=2),
             #  'layer9': ST_GCN_block(256, 256, A, cuda_),
             #  'layer10': ST_GCN_block(256, 256, A, cuda_)
              }
