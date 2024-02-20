@@ -200,7 +200,7 @@ class MarcSTGCN(nn.Module):
         x = x.view(N, M, c_new, -1) # (batch, people, new_channel_size, times * nodes)
         x = x.mean(3).mean(1) # Take mean across times*nodes and people
         # return softmax(self.fc(x), dim=1) # in shape: (batch, new_channel_size)
-        return self.fx(x)
+        return self.fc(x)
 
 class STGCN:
     def __init__(self, ds, loss_fn=torch.nn.CrossEntropyLoss()):
