@@ -13,6 +13,7 @@ from tqdm import tqdm
 from sklearn.metrics import confusion_matrix
 from torchmetrics.functional import precision, recall
 from torch.utils.tensorboard import SummaryWriter
+from torchmetrics import Accuracy, Precision, Recall
 import seaborn as sns
 import matplotlib.pyplot as plt
 from torch.nn.functional import softmax
@@ -166,14 +167,14 @@ class MarcSTGCN(nn.Module):
 
         self.layers = nn.ModuleDict(
             {'layer1': ST_GCN_block(in_channels, 64, A, cuda_, residual=False),
-            #  'layer2': ST_GCN_block(64, 64, A, cuda_),
-            #  'layer3': ST_GCN_block(64, 64, A, cuda_),
              'layer2': ST_GCN_block(64, 64, A, cuda_),
-             'layer3': ST_GCN_block(64, 128, A, cuda_, stride=2),
-            #  'layer6': ST_GCN_block(128, 128, A, cuda_),
-            #  'layer7': ST_GCN_block(128, 128, A, cuda_),
-             'layer4': ST_GCN_block(128, 256, A, cuda_, stride=2),
-            #  'layer9': ST_GCN_block(256, 256, A, cuda_),
+             'layer3': ST_GCN_block(64, 64, A, cuda_),
+             'layer4': ST_GCN_block(64, 64, A, cuda_),
+             'layer5': ST_GCN_block(64, 128, A, cuda_, stride=2),
+             'layer6': ST_GCN_block(128, 128, A, cuda_),
+             'layer7': ST_GCN_block(128, 128, A, cuda_),
+             'layer8': ST_GCN_block(128, 256, A, cuda_, stride=2),
+             'layer9': ST_GCN_block(256, 256, A, cuda_),
             #  'layer10': ST_GCN_block(256, 256, A, cuda_)
              }
         )
@@ -203,7 +204,7 @@ class MarcSTGCN(nn.Module):
         return self.fc(x)
 
 class STGCN:
-    def __init__(self, ds, loss_fn=torch.nn.CrossEntropyLoss()):
+    def __init__(self, ds, loss_fn=torch.nn.functional.cross_entropy):
         self.train_set, self.test_set, self.val_set = ds
         self.time_steps = self.train_set.X.size()[2]
         ds = self.train_set
@@ -217,8 +218,11 @@ class STGCN:
 
         self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph).to(device)
         self.tracking_metrics = {
-            "precision": lambda x,y: precision(x, y, 'multiclass', num_classes=self.n_classes),
-            "recall": lambda x,y: recall(x, y, 'multiclass', num_classes=self.n_classes),
+            # "precision": lambda x,y: precision(x, y, 'multilabel', num_classes=self.n_classes),
+            # "recall": lambda x,y: recall(x, y, 'multilabel', num_classes=self.n_classes),
+            "accuracy": Accuracy("multiclass", average="macro", num_classes=self.n_classes).to(device),
+            "precision": Precision("multiclass", average="macro", num_classes=self.n_classes).to(device),
+            "recall": Recall("multiclass", average="macro", num_classes=self.n_classes).to(device)
         }
         self.train()
         # print(train_data.dtype)
@@ -232,6 +236,7 @@ class STGCN:
             val_metrics = {}
         val_metrics = {}
         X, y = sample
+        X = X.to(device)
         y = y.to(device)
         optimizer.zero_grad()
         outputs = self.classifier(X)
@@ -242,20 +247,22 @@ class STGCN:
 
         optimizer.step()
         metrics["scalar"]['loss'] = loss.item()
-        for k in self.tracking_metrics.keys():
-            metrics["scalar"][k] = self.tracking_metrics[k](y, predictions).item()
-        cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1))
-        if "conf_mat" not in metrics["image"].keys():
-          metrics["image"]["conf_mat"] = cm
+        with torch.no_grad():
+            for k in self.tracking_metrics.keys():
+                metrics["scalar"][k] = self.tracking_metrics[k](y, predictions).item()
+            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1))
+            if "conf_mat" not in metrics["image"].keys():
+                metrics["image"]["conf_mat"] = cm
 
-        else:
-            metrics["image"]["conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
+            else:
+                metrics["image"]["conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
                     
         return metrics
 
     def _val_step(self, sample, val_metrics):
         val_metrics["scalar"] = {}
         X, y = sample
+        X = X.to(device)
         y = y.to(device)
         
         with torch.no_grad():
@@ -266,20 +273,20 @@ class STGCN:
             for k in self.tracking_metrics.keys():
                 val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](y, predictions).item()
 
-        cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1))
-        if "val_conf_mat" not in val_metrics["image"]:
-            val_metrics["image"]["val_conf_mat"]  = cm
+            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1))
+            if "val_conf_mat" not in val_metrics["image"]:
+                val_metrics["image"]["val_conf_mat"]  = cm
 
-        else:
-            # print(val_metrics["image"]["val_conf_mat"].shape, cm.shape)
-            val_metrics["image"]["val_conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
+            else:
+                # print(val_metrics["image"]["val_conf_mat"].shape, cm.shape)
+                val_metrics["image"]["val_conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
 
         
 
         return val_metrics
 
 
-    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=0.01, momentum=0.95, epochs=1000, batch_size=32):
+    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=1000, batch_size=32):
         # train_samples = int((1 - test_split) * len(self.ds))
         # test_samples = int(len(self.ds) - train_samples)
         # val_samples = int(val_split * train_samples)
@@ -295,7 +302,7 @@ class STGCN:
 
         if optimizer is None:
             # optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-4)
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-3)
 
         writer = SummaryWriter()
 
@@ -322,7 +329,7 @@ class STGCN:
                     scalar_metrics[k] += train_metrics["scalar"][k] / len(train_iter)
                 
                 train_iter.set_postfix(train_metrics["scalar"])
-            sns.heatmap(train_metrics["image"]["conf_mat"])
+            sns.heatmap(train_metrics["image"]["conf_mat"], annot=True)
             plt.xlabel("Predicted")
             plt.ylabel("True")
             writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
@@ -342,7 +349,7 @@ class STGCN:
             # fig = plt.figure()
             # image = torch.image.decode_png(fig.getvalue(), channels=4)
 
-            sns.heatmap(val_metrics["image"]["val_conf_mat"])
+            sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=True)
             plt.xlabel("Predicted")
             plt.ylabel("True")
             # plt.imshow(hm)

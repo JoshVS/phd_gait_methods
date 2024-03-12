@@ -57,35 +57,24 @@ def read_from_cached_file(filename):
         
 
 def get_kp_from_file(filename, kp_dict):
-    cap = cv2.VideoCapture(filename)
-
-
-    if not cap.isOpened():
-        print(f"Error opening file {filename}")
-        quit()
-    frames = []
-    
-    length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    loop = tqdm(range(length))
-    for i in loop:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        im = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        lm = pose.process(im)
-        # print(dir(lm))
-        # quit()
+    # TODO
+    frames = os.listdir(filename)
+    frame_results = []
+    for frame in frames:
         curr_frame = []
-        if lm.pose_landmarks is not None:
+        image = mp.Image.create_from_file(
+            os.path.join(filename, frame)
+        ).numpy_view()
+        pose_results = pose.process(image)
+        if pose_results.pose_landmarks is not None:
             for k in kp_dict.keys():
                 v = kp_dict[k]
-                curr_frame.append([k, lm.pose_landmarks.landmark[v].x, lm.pose_landmarks.landmark[v].y, lm.pose_landmarks.landmark[v].z])
-                # print(dir(lm.pose_landmarks))
+                curr_frame.append([k, pose_results.pose_landmarks.landmark[v].x, pose_results.pose_landmarks.landmark[v].y, pose_results.pose_landmarks.landmark[v].z])
+                # print(dir(pose_results.pose_landmarks))
                 # quit()
+        frame_results.append(curr_frame)
 
-        frames.append(curr_frame)
-    return frames
+    return frame_results
 
 
 
@@ -103,9 +92,9 @@ def write_to_file(filename, kps):
     with open(filename, "w") as outfile:
         outfile.write("\n".join(lines))
 
-class CASIADataset(GenericGaitDataset):
+class HMDBDataset(GenericGaitDataset):
 
-    def __init__(self, directory='../../../Datasets/CASIA/DatasetB-2/video/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None):
+    def __init__(self, directory='../../../Datasets/HMDB51/ds/HMDB51/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None):
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.val_split = val_split
         self.test_split = test_split
@@ -382,43 +371,37 @@ class CASIADataset(GenericGaitDataset):
         #     videos.append(class_vids)
         # self.classes = classes
         # return videos, kp_dict
-        classes = []
+        # classes = []
         videos = []
         z_data = []
         vid_filenames = []
-        person_id = 1
-        def create_person_string(p_id):
-            return f"{'0' if p_id < 10 else ''}{p_id}"
-        p_string = create_person_string(person_id)
-        list_of_files = glob.glob(f"*-*-{p_string}-*.avi", root_dir=self.directory)
-        if max_samples is None:
-            pass
-        elif 0 < max_samples < 1:
-            list_of_files = list_of_files[:int(len(list_of_files) * max_samples)]
-        elif max_samples < len(list_of_files):
-            list_of_files = list_of_files[:int(max_samples)]
+        classes = os.listdir(self.directory)
+
             
-        while len(list_of_files) > 0:
+        for class_name in classes:
+            vids = os.listdir(
+                os.path.join(self.directory, class_name)
+            )
             
             if max_samples is None:
                 pass
             elif 0 < max_samples < 1:
-                list_of_files = list_of_files[:int(len(list_of_files) * max_samples)]
-            elif max_samples < len(list_of_files):
-                list_of_files = list_of_files[:int(max_samples)]
-            classes.append(person_id)
+                vids = vids[:int(len(vids) * max_samples)]
+            elif max_samples < len(vids):
+                vids = vids[:int(max_samples)]
+            # classes.append(person_id)
             class_vids = []
             z_class_vids = []
             class_vid_filenames = []
 
-            loop = tqdm(list_of_files)
-            if not os.path.exists(f"cached/{p_string}/"):
-                os.makedirs(f"cached/{p_string}/")
+            loop = tqdm(vids)
+            if not os.path.exists(f"cached/"):
+                os.makedirs(f"cached/")
 
             for i, vid in enumerate(loop):
-                if os.path.exists(f"cached/{p_string}/{vid}.txt"):
-                    # to_append, z_datum = read_from_cached_file(f"cached/{p_string}/{vid}.txt")
-                    ret_val = read_from_cached_file(f"cached/{p_string}/{vid}.txt")
+                if os.path.exists(f"cached/{vid}.txt"):
+                    # to_append, z_datum = read_from_cached_file(f"cached/{vid}.txt")
+                    ret_val = read_from_cached_file(f"cached/{vid}.txt")
                     # if ret_val is None:
                     #     continue
                     # to_append, z_datum = ret_val
@@ -433,21 +416,17 @@ class CASIADataset(GenericGaitDataset):
                         z_class_vids.append(z_datum)
                         vid_filenames.append(os.path.join(self.directory, vid))
                 else:
-                    print(f"File cached/{p_string}/{vid}.txt doesn't exist, creating")
-                    filename = os.path.join(self.directory, vid)
+                    print(f"File cached/{vid}.txt doesn't exist, creating")
+                    filename = os.path.join(self.directory, class_name, vid)
                     c = get_kp_from_file(filename, kp_dict)
                     class_vids.append(c)
                     vid_filenames.append(filename)
-                    write_to_file(f"cached/{p_string}/{vid}.txt", c)
+                    write_to_file(f"cached/{vid}.txt", c)
             videos.append(class_vids)
             z_data.append(z_class_vids)
 
 
-            person_id += 1
-            if max_classes is not None and person_id > max_classes:
-                break
-            p_string = create_person_string(person_id)
-            list_of_files = glob.glob(f"*-*-{p_string}-*.avi", root_dir=self.directory)
+            
 
         self.video_filenames = vid_filenames
         self.classes = classes
@@ -496,8 +475,7 @@ class CASIADataset(GenericGaitDataset):
         return self.create_file_data(kp_dict, max_samples, max_classes)
         
 
-    def setup_information(self):        
-        self.step_classifier = RandomForestClassifier()        
+    def setup_information(self):               
         self.connections = [
             ('nose', 'right_eye_inner'),
             ('nose', 'left_eye_inner'),
@@ -543,11 +521,6 @@ class CASIADataset(GenericGaitDataset):
 
         ]
 
-        self.edge_matrix = [[self.kp_indices[x] for x, _ in self.connections], [self.kp_indices[y] for _, y in self.connections]]
-        self.in_edge = [
-            (self.kp_indices[x], self.kp_indices[y])
-            for (x, y) in self.connections
-        ]        
 
         self.upper_torso = [
             "nose",

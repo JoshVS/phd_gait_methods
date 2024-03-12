@@ -57,35 +57,9 @@ def read_from_cached_file(filename):
         
 
 def get_kp_from_file(filename, kp_dict):
-    cap = cv2.VideoCapture(filename)
-
-
-    if not cap.isOpened():
-        print(f"Error opening file {filename}")
-        quit()
-    frames = []
-    
-    length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    loop = tqdm(range(length))
-    for i in loop:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        im = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        lm = pose.process(im)
-        # print(dir(lm))
-        # quit()
-        curr_frame = []
-        if lm.pose_landmarks is not None:
-            for k in kp_dict.keys():
-                v = kp_dict[k]
-                curr_frame.append([k, lm.pose_landmarks.landmark[v].x, lm.pose_landmarks.landmark[v].y, lm.pose_landmarks.landmark[v].z])
-                # print(dir(lm.pose_landmarks))
-                # quit()
-
-        frames.append(curr_frame)
-    return frames
+    # kp_dict: {keypoint: index}
+    # TODO
+    return None
 
 
 
@@ -496,8 +470,7 @@ class CASIADataset(GenericGaitDataset):
         return self.create_file_data(kp_dict, max_samples, max_classes)
         
 
-    def setup_information(self):        
-        self.step_classifier = RandomForestClassifier()        
+    def setup_information(self):               
         self.connections = [
             ('nose', 'right_eye_inner'),
             ('nose', 'left_eye_inner'),
@@ -543,11 +516,6 @@ class CASIADataset(GenericGaitDataset):
 
         ]
 
-        self.edge_matrix = [[self.kp_indices[x] for x, _ in self.connections], [self.kp_indices[y] for _, y in self.connections]]
-        self.in_edge = [
-            (self.kp_indices[x], self.kp_indices[y])
-            for (x, y) in self.connections
-        ]        
 
         self.upper_torso = [
             "nose",
