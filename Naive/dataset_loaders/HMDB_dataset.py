@@ -30,6 +30,8 @@ def _dim(l, check_for_error):
     if type(l) != list and type(l) != np.ndarray:
         return []
     else:
+        if len(l) == 0:
+            return [0]
         if type(l[0]) == list and check_for_error:
             next_dim = len(l[0])
             for mini_l in l[1:]:
@@ -56,7 +58,7 @@ def read_from_cached_file(filename):
     
         
 
-def get_kp_from_file(filename, kp_dict):
+def get_kp_from_file(filename, kp_dict, min_frames = 8):
     # TODO
     frames = os.listdir(filename)
     frame_results = []
@@ -72,8 +74,10 @@ def get_kp_from_file(filename, kp_dict):
                 curr_frame.append([k, pose_results.pose_landmarks.landmark[v].x, pose_results.pose_landmarks.landmark[v].y, pose_results.pose_landmarks.landmark[v].z])
                 # print(dir(pose_results.pose_landmarks))
                 # quit()
-        frame_results.append(curr_frame)
-
+        frame_results.extend(curr_frame)
+    if len(frame_results) < (min_frames*len(kp_dict.keys())):
+        print(f"{filename} has less than {min_frames} frames, skipping")
+        return None
     return frame_results
 
 
@@ -81,20 +85,24 @@ def get_kp_from_file(filename, kp_dict):
 
 def write_to_file(filename, kps):
     lines = []
+    if kps == "":
+        with open(filename, "w") as outfile:
+            outfile.write("")
+        return
     for kp in kps:
-        curr_line = []
-        for p in kp:
-            c = []
-            for i in p:
-                c.append(str(i))
-            curr_line.append(";".join(c))
+        curr_line = [";".join([str(x) for x in kp])]
+        # for p in kp:
+        #     c = []
+        #     for i in p:
+        #         c.append(str(i))
+        #     curr_line.append(";".join(c))
         lines.extend(curr_line)
     with open(filename, "w") as outfile:
         outfile.write("\n".join(lines))
 
 class HMDBDataset(GenericGaitDataset):
 
-    def __init__(self, directory='../../../Datasets/HMDB51/ds/HMDB51/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None):
+    def __init__(self, directory='../../../Datasets/HMDB51/HMDB51/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None):
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.val_split = val_split
         self.test_split = test_split
@@ -112,7 +120,7 @@ class HMDBDataset(GenericGaitDataset):
         self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
         
         
-        self.X, self.labels = self.reshape_skeletons()
+        self.X = self.reshape_skeletons()
         
         
         self.y  = self.labels
@@ -150,17 +158,24 @@ class HMDBDataset(GenericGaitDataset):
         # self.X = self.get_position_vectors()
         self.X = self.adjust_input_data(self.X)
         self.split_train_and_test()
-        self.gso = self.normalize_gso(self.create_graph_shift_operator())
 
     def convert_to_one_hot(self):
         onehot_mat = np.zeros((len(self.y), self.n_classes))
+        # print(onehot_mat.shape)
+        # print(max(self.y))
+        # print(np.unique(self.y))
+        # quit()
         for i in range(onehot_mat.shape[0]):
+            # print(i, dim(self.y), self.y)
             onehot_mat[i, self.y[i]] = 1
         return onehot_mat
 
 
     def interpolate_by_time(self, convert_to_numpy=True):
         min_frames = min([len(x) for x in self.X])
+        # print(dim(self.X))
+        # print([len(x) for x in self.X])
+        # quit()
         for i in range(len(self.X)):
             curr_sample = self.X[i]
             x = np.arange(len(curr_sample))
@@ -329,19 +344,19 @@ class HMDBDataset(GenericGaitDataset):
 
     def reshape_skeletons(self):
         # Need skeleton to be shape (vid_seq, frame, keypoints, 2)
-        labels = []
         reshaped_skel = []
         reshaped_z_data = []
         for i, person in enumerate(self.skel_data):
             # reshaped_skel.append([])
-            for f in person:
-                reshaped_skel.append([])
-                labels.append(i)
-                for l in f:
-                    if l[0] == self.headpoint:
-                        reshaped_skel[-1].append([])
-                    reshaped_skel[-1][-1].append(l[1:])
-        return reshaped_skel, labels
+            reshaped_skel.append([])
+            for l in person:
+                
+                
+                if l[0] == self.headpoint:
+                    reshaped_skel[-1].append([])
+                reshaped_skel[-1][-1].append(l[1:])
+            
+        return reshaped_skel
 
     def create_file_data(self, kp_dict, max_samples, max_classes):
         if not os.path.exists("cached/"):
@@ -375,10 +390,14 @@ class HMDBDataset(GenericGaitDataset):
         videos = []
         z_data = []
         vid_filenames = []
-        classes = os.listdir(self.directory)
+        classe_names = os.listdir(self.directory)
+        classes = []
 
-            
-        for class_name in classes:
+        
+        for class_idx ,class_name in enumerate(classe_names):
+            print("#################################")
+            print(f"Class {class_idx + 1} / {len(classe_names)}")
+            print("#################################")
             vids = os.listdir(
                 os.path.join(self.directory, class_name)
             )
@@ -402,6 +421,7 @@ class HMDBDataset(GenericGaitDataset):
                 if os.path.exists(f"cached/{vid}.txt"):
                     # to_append, z_datum = read_from_cached_file(f"cached/{vid}.txt")
                     ret_val = read_from_cached_file(f"cached/{vid}.txt")
+                    
                     # if ret_val is None:
                     #     continue
                     # to_append, z_datum = ret_val
@@ -412,24 +432,43 @@ class HMDBDataset(GenericGaitDataset):
                     if ret_val is not None:
                         to_append, z_datum = ret_val
                         to_append = [[a, b, c, d[0]] for ((a, b, c), (d)) in zip(to_append, z_datum)]
-                        class_vids.append(to_append)
+                        videos.append(to_append)
                         z_class_vids.append(z_datum)
                         vid_filenames.append(os.path.join(self.directory, vid))
+                        classes.append(class_idx)
                 else:
-                    print(f"File cached/{vid}.txt doesn't exist, creating")
+                    print(f"[{class_idx + 1} / {len(classe_names)}]File cached/{vid}.txt doesn't exist, creating")
                     filename = os.path.join(self.directory, class_name, vid)
                     c = get_kp_from_file(filename, kp_dict)
-                    class_vids.append(c)
-                    vid_filenames.append(filename)
-                    write_to_file(f"cached/{vid}.txt", c)
-            videos.append(class_vids)
-            z_data.append(z_class_vids)
+                    if c is not None:
+                        videos.append(c)
+                        vid_filenames.append(filename)
+                        write_to_file(f"cached/{vid}.txt", c)
+                        classes.append(class_idx)
+                    else:
+                        write_to_file(f"cached/{vid}.txt", "")
+            # videos.append(class_vids)
+            # z_data.append(z_class_vids)
+            # print([len(v)//33 for v in videos])
 
+        # print(dim(videos), dim(classes))
+        # print([len(v)//33 for v in videos])
+        # quit()
+        # print(classes, classe_names)
+        # quit()
+        i = 0
+        while(i < len(classe_names)):
+            if classes.count(i) == 0:
+                classe_names.pop(i)
+            else:
+                i += 1
 
-            
+        for i, val in enumerate(np.unique(classes)):
+            classes = [i if x==val else x for x in classes]
+       
 
         self.video_filenames = vid_filenames
-        self.classes = classes
+        self.classes = classe_names
         return videos, kp_dict, classes
             
 
