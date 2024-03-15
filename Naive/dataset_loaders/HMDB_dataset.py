@@ -42,7 +42,7 @@ def _dim(l, check_for_error):
 def dim(l, check_for_error=False):
     return tuple(_dim(l, check_for_error))
 
-def read_from_cached_file(filename):
+def read_from_cached_file(filename, min_samples=2):
     with open(filename, 'r') as in_file:
         lines = in_file.read().split("\n")
     curr_data = []
@@ -52,13 +52,13 @@ def read_from_cached_file(filename):
         kp, x, y, z = line.split(";")
         curr_data.append([kp, float(x), float(y)])
         z_data.append([float(z)])
-    if curr_data == []:
+    if curr_data == [] or (len(curr_data) // 33) < min_samples:
         return None
     return curr_data, z_data
     
         
 
-def get_kp_from_file(filename, kp_dict, min_frames = 8):
+def get_kp_from_file(filename, kp_dict, min_frames = 2):
     # TODO
     frames = os.listdir(filename)
     frame_results = []
@@ -172,7 +172,7 @@ class HMDBDataset(GenericGaitDataset):
 
 
     def interpolate_by_time(self, convert_to_numpy=True):
-        min_frames = min([len(x) for x in self.X])
+        min_frames = max([len(x) for x in self.X])
         # print(dim(self.X))
         # print([len(x) for x in self.X])
         # quit()
@@ -184,6 +184,7 @@ class HMDBDataset(GenericGaitDataset):
             xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
             # print(xnew, len(curr_sample))
             # quit()
+            y_old = f(x)
             ynew = f(xnew)
             self.X[i] = ynew
         if convert_to_numpy:
@@ -560,6 +561,11 @@ class HMDBDataset(GenericGaitDataset):
 
         ]
 
+        self.edge_matrix = [[self.kp_indices[x] for x, _ in self.connections], [self.kp_indices[y] for _, y in self.connections]]
+        self.in_edge = [
+            (self.kp_indices[x], self.kp_indices[y])
+            for (x, y) in self.connections
+        ]        
 
         self.upper_torso = [
             "nose",
