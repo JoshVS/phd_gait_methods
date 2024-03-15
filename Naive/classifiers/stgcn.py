@@ -239,6 +239,7 @@ class STGCN:
         X, y = sample
         X = X.to(device)
         y = y.to(device)
+        # print(y.size())
         optimizer.zero_grad()
         outputs = self.classifier(X)
         predictions = torch.nn.functional.one_hot(outputs.argmax(axis=1), num_classes=self.n_classes)
@@ -251,11 +252,15 @@ class STGCN:
         with torch.no_grad():
             for k in self.tracking_metrics.keys():
                 metrics["scalar"][k] = self.tracking_metrics[k](y, predictions).item()
-            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1))
+            # print(y.cpu().numpy().argmax(axis=1).shape, predictions.cpu().numpy().argmax(axis=1).shape)
+            # quit()
+            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
             if "conf_mat" not in metrics["image"].keys():
+                # print(cm.shape)
                 metrics["image"]["conf_mat"] = cm
 
             else:
+                # print(cm.shape)
                 metrics["image"]["conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
                     
         return metrics
@@ -274,11 +279,13 @@ class STGCN:
             for k in self.tracking_metrics.keys():
                 val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](y, predictions).item()
 
-            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1))
+            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
             if "val_conf_mat" not in val_metrics["image"]:
+                # print(cm.shape)
                 val_metrics["image"]["val_conf_mat"]  = cm
 
             else:
+                # print(cm.shape)
                 # print(val_metrics["image"]["val_conf_mat"].shape, cm.shape)
                 val_metrics["image"]["val_conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
 
@@ -287,7 +294,7 @@ class STGCN:
         return val_metrics
 
 
-    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=0.001, momentum=0.9, epochs=1000, batch_size=32):
+    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=0.01, momentum=0.9, epochs=1000, batch_size=32):
         # train_samples = int((1 - test_split) * len(self.ds))
         # test_samples = int(len(self.ds) - train_samples)
         # val_samples = int(val_split * train_samples)
@@ -314,7 +321,7 @@ class STGCN:
         #         self._train_step(curr_sample, optimizer)
         #         curr_sample = next(train_iter)
 
-        print(f"Training with {self.time_steps} time steps")
+        print(f"Training with {self.time_steps} time steps and {self.n_classes} classes")
         for epoch in range(epochs):
             print()
             print(f"Epoch #{epoch + 1}: ")
