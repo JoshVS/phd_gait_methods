@@ -1,7 +1,7 @@
 """
 Modified based on: https://github.com/open-mmlab/mmskeleton
 """
-
+import os
 import math
 import numpy as np
 import torch
@@ -21,6 +21,9 @@ torch.set_default_dtype(torch.double)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+SAVE_MODEL = 5
+LOAD_MODEL = True
+MODEL_NAME = "model_checkpoints"
 
 def force_cudnn_initialization():
     if device == "cuda":
@@ -205,7 +208,8 @@ class MarcSTGCN(nn.Module):
         return self.fc(x)
 
 class STGCN:
-    def __init__(self, ds, loss_fn=torch.nn.functional.cross_entropy):
+    def __init__(self, ds, loss_fn=torch.nn.functional.cross_entropy, model_name=MODEL_NAME):
+        self.model_name = model_name
         self.train_set, self.test_set, self.val_set = ds
         self.time_steps = self.train_set.X.size()[2]
         ds = self.train_set
@@ -218,6 +222,17 @@ class STGCN:
         self.graph = MediapipeGraph(self.n_point, ds.in_edge)
 
         self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph).to(device)
+        if not os.path.exists(model_name):
+            os.makedirs(model_name)
+        if LOAD_MODEL:
+            model_names = os.listdir(model_name)
+            if len(model_names) == 0:
+                print("No models found, creating a new one")
+            else:
+                model_files = os.path.join(model_name, os.listdir(model_name)[-1])
+                print(f"Loading model from {model_files}")
+                self.classifier.load_state_dict(torch.load(model_files))
+
         self.tracking_metrics = {
             # "precision": lambda x,y: precision(x, y, 'multilabel', num_classes=self.n_classes),
             # "recall": lambda x,y: recall(x, y, 'multilabel', num_classes=self.n_classes),
@@ -357,6 +372,17 @@ class STGCN:
                         scalar_metrics["val"][k] = 0
                     scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(val_iter)
                 val_iter.set_postfix(val_metrics["scalar"])
+
+            
+            
+            if SAVE_MODEL is not None:
+                if (epoch + 1) % SAVE_MODEL == 0:
+                    m_name = f"epoch_{epoch + 1}"
+                    for k in scalar_metrics["val"].keys():
+                        m_name += f"_{k}_{scalar_metrics['val'][k]:.2f}"
+                    filename = os.path.join(self.model_name, m_name)
+                    print(f"Saving model to {filename}")
+                    torch.save(self.classifier.state_dict(), filename)
                 
             # fig = plt.figure()
             # image = torch.image.decode_png(fig.getvalue(), channels=4)

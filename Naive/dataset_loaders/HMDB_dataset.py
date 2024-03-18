@@ -102,11 +102,13 @@ def write_to_file(filename, kps):
 
 class HMDBDataset(GenericGaitDataset):
 
-    def __init__(self, directory='../../../Datasets/HMDB51/HMDB51/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None):
+    def __init__(self, directory='../../../Datasets/HMDB51/HMDB51/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=53):
+        
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.val_split = val_split
         self.test_split = test_split
         self.max_classes = max_classes
+        self.num_timesteps = num_timesteps
         self.initialise_stuff()
 
     def initialise_stuff(self):
@@ -172,7 +174,7 @@ class HMDBDataset(GenericGaitDataset):
 
 
     def interpolate_by_time(self, convert_to_numpy=True):
-        min_frames = max([len(x) for x in self.X])//4
+        min_frames = self.num_timesteps#max([len(x) for x in self.X])//4
         # print(dim(self.X))
         # print([len(x) for x in self.X])
         # quit()
