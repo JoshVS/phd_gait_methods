@@ -172,7 +172,7 @@ class HMDBDataset(GenericGaitDataset):
 
 
     def interpolate_by_time(self, convert_to_numpy=True):
-        min_frames = max([len(x) for x in self.X])
+        min_frames = max([len(x) for x in self.X])//4
         # print(dim(self.X))
         # print([len(x) for x in self.X])
         # quit()

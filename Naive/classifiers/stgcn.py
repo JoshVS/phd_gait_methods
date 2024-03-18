@@ -10,7 +10,7 @@ from torch.autograd import Variable
 from graphs.mpg import MediapipeGraph
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, accuracy_score
 from torchmetrics.functional import precision, recall
 from torch.utils.tensorboard import SummaryWriter
 from torchmetrics import Accuracy, Precision, Recall
@@ -221,9 +221,12 @@ class STGCN:
         self.tracking_metrics = {
             # "precision": lambda x,y: precision(x, y, 'multilabel', num_classes=self.n_classes),
             # "recall": lambda x,y: recall(x, y, 'multilabel', num_classes=self.n_classes),
-            "accuracy": Accuracy("multiclass", average="macro", num_classes=self.n_classes).to(device),
-            "precision": Precision("multiclass", average="macro", num_classes=self.n_classes).to(device),
-            "recall": Recall("multiclass", average="macro", num_classes=self.n_classes).to(device)
+            # "accuracy": Accuracy("multiclass", average="macro", num_classes=self.n_classes).to(device),
+            # "precision": Precision("multiclass", average="macro", num_classes=self.n_classes).to(device),
+            # "recall": Recall("multiclass", average="macro", num_classes=self.n_classes).to(device)
+            "accuracy": lambda x, y: accuracy_score(x.cpu().numpy(), y.cpu().numpy()),
+            "precision": lambda x, y: precision_score(x.cpu().numpy(), y.cpu().numpy(), average="macro", zero_division=0.0),
+            "recall": lambda x, y: recall_score(x.cpu().numpy(), y.cpu().numpy(), average="macro", zero_division=0.0)
         }
         self.train()
         # print(train_data.dtype)
@@ -251,7 +254,7 @@ class STGCN:
         metrics["scalar"]['loss'] = loss.item()
         with torch.no_grad():
             for k in self.tracking_metrics.keys():
-                metrics["scalar"][k] = self.tracking_metrics[k](y, predictions).item()
+                metrics["scalar"][k] = self.tracking_metrics[k](y, predictions)
             # print(y.cpu().numpy().argmax(axis=1).shape, predictions.cpu().numpy().argmax(axis=1).shape)
             # quit()
             cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
@@ -277,7 +280,7 @@ class STGCN:
             val_loss = self.loss_fn(val_out, y)
             val_metrics["scalar"]["val_loss"] = val_loss.item()
             for k in self.tracking_metrics.keys():
-                val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](y, predictions).item()
+                val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](y, predictions)
 
             cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
             if "val_conf_mat" not in val_metrics["image"]:
@@ -310,7 +313,7 @@ class STGCN:
 
         if optimizer is None:
             # optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-3)
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-5)
 
         writer = SummaryWriter()
 
@@ -326,18 +329,19 @@ class STGCN:
             print()
             print(f"Epoch #{epoch + 1}: ")
             train_iter = tqdm(iter(self.train_set))
-            scalar_metrics = {}
+            scalar_metrics = {"train":{},
+                              "val":{}}
             train_metrics = {"scalar": {}, "image": {}}
             for idx, curr_sample in enumerate(train_iter):
                 train_metrics = self._train_step(curr_sample, optimizer, train_metrics)
                 for k in train_metrics["scalar"].keys():
-                    if k not in scalar_metrics.keys():
-                        scalar_metrics[k] = 0
+                    if k not in scalar_metrics["train"].keys():
+                        scalar_metrics["train"][k] = 0
                     
-                    scalar_metrics[k] += train_metrics["scalar"][k] / len(train_iter)
+                    scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(train_iter)
                 
                 train_iter.set_postfix(train_metrics["scalar"])
-            sns.heatmap(train_metrics["image"]["conf_mat"], annot=True)
+            sns.heatmap(train_metrics["image"]["conf_mat"], annot=False)
             plt.xlabel("Predicted")
             plt.ylabel("True")
             writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
@@ -349,15 +353,15 @@ class STGCN:
             for idx, val_sample in enumerate(val_iter):
                 val_metrics = self._val_step(val_sample, val_metrics)
                 for k in val_metrics["scalar"].keys():
-                    if k not in scalar_metrics.keys():
-                        scalar_metrics[k] = 0
-                    scalar_metrics[k] += val_metrics["scalar"][k] / len(val_iter)
+                    if k not in scalar_metrics["val"].keys():
+                        scalar_metrics["val"][k] = 0
+                    scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(val_iter)
                 val_iter.set_postfix(val_metrics["scalar"])
                 
             # fig = plt.figure()
             # image = torch.image.decode_png(fig.getvalue(), channels=4)
 
-            sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=True)
+            sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False)
             plt.xlabel("Predicted")
             plt.ylabel("True")
             # plt.imshow(hm)
@@ -367,9 +371,15 @@ class STGCN:
             # image = img_flat.reshape(*reversed(img_flat.get_width_height), 3)
             writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)
             plt.close()
-            for k in scalar_metrics.keys():
-                v = scalar_metrics[k]
+            print("##################")
+            for k in scalar_metrics["train"].keys():
+                v = scalar_metrics["train"][k]
+                v_val = scalar_metrics["val"]["val_" + k]
                 print(f"{k.capitalize()}: {v:.3f}")
-                writer.add_scalar(k.capitalize(), v, epoch)
+                print(f"{('val_' + k).capitalize()}: {v_val:.3f}")
+                print("##################")
+                writer.add_scalars(k.capitalize(), {"train": v,
+                                                    "validation":v_val
+                }, epoch)
 
 
