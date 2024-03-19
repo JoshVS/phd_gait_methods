@@ -102,7 +102,7 @@ def write_to_file(filename, kps):
 
 class HMDBDataset(GenericGaitDataset):
 
-    def __init__(self, directory='../../../Datasets/HMDB51/HMDB51/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=53):
+    def __init__(self, directory='../../../Datasets/HMDB51/HMDB51/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=20):
         
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.val_split = val_split
@@ -393,7 +393,7 @@ class HMDBDataset(GenericGaitDataset):
         videos = []
         z_data = []
         vid_filenames = []
-        classe_names = os.listdir(self.directory)
+        classe_names = os.listdir(self.directory)[:max_classes]
         classes = []
 
         

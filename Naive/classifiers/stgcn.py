@@ -2,6 +2,7 @@
 Modified based on: https://github.com/open-mmlab/mmskeleton
 """
 import os
+import glob
 import math
 import numpy as np
 import torch
@@ -21,7 +22,7 @@ torch.set_default_dtype(torch.double)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-SAVE_MODEL = 5
+SAVE_MODEL = 1
 LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
 
@@ -55,7 +56,7 @@ def weights_init(module_, bs=1):
 
 
 class GraphConvolution(nn.Module):
-    def __init__(self, in_channels, out_channels, A, cuda_, dropout=0.2):
+    def __init__(self, in_channels, out_channels, A, cuda_, dropout=0.5):
         super(GraphConvolution, self).__init__()
         self.cuda_ = cuda_
         self.graph_attn = nn.Parameter(torch.from_numpy(A.astype(np.float32))) #graph_attn is the neighbourhoods - how is it represented?
@@ -225,13 +226,18 @@ class STGCN:
         if not os.path.exists(model_name):
             os.makedirs(model_name)
         if LOAD_MODEL:
-            model_names = os.listdir(model_name)
-            if len(model_names) == 0:
+            if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}")):
+                print("No models found, creating a new one")
+            elif not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}")):
                 print("No models found, creating a new one")
             else:
-                model_files = os.path.join(model_name, os.listdir(model_name)[-1])
-                print(f"Loading model from {model_files}")
-                self.classifier.load_state_dict(torch.load(model_files))
+                model_names = os.listdir(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}"))
+                if len(model_names) == 0:
+                    print("No models found, creating a new one")
+                else:
+                    model_files = model_names[-1]#os.path.join(model_name, model_names[-1])
+                    print(f"Loading model from {model_files}")
+                    self.classifier.load_state_dict(torch.load(model_files))
 
         self.tracking_metrics = {
             # "precision": lambda x,y: precision(x, y, 'multilabel', num_classes=self.n_classes),
@@ -328,7 +334,7 @@ class STGCN:
 
         if optimizer is None:
             # optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-5)
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-4)
 
         writer = SummaryWriter()
 
@@ -338,6 +344,7 @@ class STGCN:
         #     while curr_sample is not None:
         #         self._train_step(curr_sample, optimizer)
         #         curr_sample = next(train_iter)
+        prev_metrics = 0
 
         print(f"Training with {self.time_steps} time steps and {self.n_classes} classes")
         for epoch in range(epochs):
@@ -377,12 +384,21 @@ class STGCN:
             
             if SAVE_MODEL is not None:
                 if (epoch + 1) % SAVE_MODEL == 0:
-                    m_name = f"epoch_{epoch + 1}"
-                    for k in scalar_metrics["val"].keys():
-                        m_name += f"_{k}_{scalar_metrics['val'][k]:.2f}"
-                    filename = os.path.join(self.model_name, m_name)
-                    print(f"Saving model to {filename}")
-                    torch.save(self.classifier.state_dict(), filename)
+                    curr_metrics = np.sum(list(scalar_metrics["val"].values()))
+                    if curr_metrics < prev_metrics:
+                        print("Current Metrics not as good, skipping")
+                    else:
+                        prev_metrics = curr_metrics
+                        m_name = f"epoch_{epoch + 1}"
+                        for k in scalar_metrics["val"].keys():
+                            m_name += f"_{k}_{scalar_metrics['val'][k]:.2f}"
+                        if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}")):
+                            os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}"))
+                        if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}")):
+                            os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}"))
+                        filename = os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}", m_name+".pt")
+                        print(f"Saving model to {filename}")
+                        torch.save(self.classifier.state_dict(), filename)
                 
             # fig = plt.figure()
             # image = torch.image.decode_png(fig.getvalue(), channels=4)
