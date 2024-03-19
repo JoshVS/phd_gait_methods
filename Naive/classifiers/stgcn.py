@@ -22,7 +22,7 @@ torch.set_default_dtype(torch.double)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-SAVE_MODEL = 1
+SAVE_MODEL = 5
 LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
 
@@ -235,7 +235,7 @@ class STGCN:
                 if len(model_names) == 0:
                     print("No models found, creating a new one")
                 else:
-                    model_files = model_names[-1]#os.path.join(model_name, model_names[-1])
+                    model_files = os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}", model_names[-1])#os.path.join(model_name, model_names[-1])
                     print(f"Loading model from {model_files}")
                     self.classifier.load_state_dict(torch.load(model_files))
 
