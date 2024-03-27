@@ -6,6 +6,9 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from .genericdataset import GenericGaitDataset
+import seaborn as sns
+import matplotlib.pyplot as plt
+import plotly.express as px
 
 import torch
 from scipy.interpolate import interp1d
@@ -13,18 +16,24 @@ from scipy.interpolate import interp1d
 np.seterr(all='raise')
 
 from sklearn.ensemble import RandomForestClassifier
+from celluloid import Camera
 
 import mediapipe as mp
 mp_pose = mp.solutions.pose
-pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+pose = mp_pose.Pose(min_detection_confidence=0.8, min_tracking_confidence=0.8, smooth_landmarks=True)
 
-
-
+READ_FROM_CACHE = True
+WRITE_TO_CACHE = True
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def cell_callback_factory(num_frames):
 
+    def cell_callback(curr_frame, total_frames):
+        # if curr_frame % (num_frames // 10) == 0:
+        print(f"Frame {curr_frame} / {num_frames}")
+    return cell_callback
 
 def _dim(l, check_for_error):
     if type(l) != list and type(l) != np.ndarray:
@@ -58,21 +67,30 @@ def read_from_cached_file(filename, min_samples=2):
     
         
 
-def get_kp_from_file(filename, kp_dict, min_frames = 2):
+def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=256):
     # TODO
+    
     frames = os.listdir(filename)
     frame_results = []
     for frame in frames:
         curr_frame = []
-        image = mp.Image.create_from_file(
+        # image = mp.Image.create_from_file(
+        #     os.path.join(filename, frame)
+        # ).numpy_view()
+        image = cv2.imread(
             os.path.join(filename, frame)
-        ).numpy_view()
+        )
+        image = cv2.resize(image, (im_height, im_width), interpolation=cv2.INTER_LINEAR)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
         pose_results = pose.process(image)
+        # print(dir(pose_results))
+        # quit()
         if pose_results.pose_landmarks is not None:
             for k in kp_dict.keys():
                 v = kp_dict[k]
                 curr_frame.append([k, pose_results.pose_landmarks.landmark[v].x, pose_results.pose_landmarks.landmark[v].y, pose_results.pose_landmarks.landmark[v].z])
-                # print(dir(pose_results.pose_landmarks))
+                # print(dir(pose_results.pose_world_landmarks))
                 # quit()
         frame_results.extend(curr_frame)
     if len(frame_results) < (min_frames*len(kp_dict.keys())):
@@ -102,10 +120,11 @@ def write_to_file(filename, kps):
 
 class HMDBDataset(GenericGaitDataset):
 
-    def __init__(self, directory='../../../Datasets/HMDB51/HMDB51/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=20):
+    def __init__(self, directory='../../../Datasets/HMDB51/HMDB51/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None):
         
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.val_split = val_split
+        self.exclude_classes = exclude_classes
         self.test_split = test_split
         self.max_classes = max_classes
         self.num_timesteps = num_timesteps
@@ -113,6 +132,8 @@ class HMDBDataset(GenericGaitDataset):
 
     def initialise_stuff(self):
         self.skel_data, self.kp_indices, self.labels = self._get_file_data(self.max_samples, self.max_classes) # (n_people, n_files, n_lines, 3)
+        # print(self.skel_data)
+        # quit()
         
         
         
@@ -123,14 +144,13 @@ class HMDBDataset(GenericGaitDataset):
         
         
         self.X = self.reshape_skeletons()
+        # print(self.X)
+        # quit()
         
         
         self.y  = self.labels
 
-
-        self.translation_vector()
-        self.scaling_vector()
-        # print(self.X)
+        # print(self.X[1][0])
         # quit()
         if self.generate_test_video is not None:
             self.show_video(self.generate_test_video)
@@ -141,10 +161,24 @@ class HMDBDataset(GenericGaitDataset):
         if self.generate_test_video is not None and self.generate_test_video < 0:
             quit()
    
+
+        # self.translation_vector()
+        # self.scaling_vector()
         # quit()     
         # self.X, self.y = self.get_individual_steps()
    
         self.interpolate_by_time()
+        # print(self.y)
+        # quit()
+        # sns.histplot(np.array(self.y), x=self.classes)
+        _, counts = np.unique(self.y, return_counts=True)
+        plt.figure()
+        plt.bar(self.classes, counts)
+        plt.xticks(rotation=90)
+        plt.savefig("class_dist.png")
+        plt.close()
+
+
         
         self.n_classes = len(np.unique(self.y))
         self.y = self.convert_to_one_hot()
@@ -160,6 +194,144 @@ class HMDBDataset(GenericGaitDataset):
         # self.X = self.get_position_vectors()
         self.X = self.adjust_input_data(self.X)
         self.split_train_and_test()
+
+    def show_video(self, i, include_centroids=False, max_frames=200, outfile = "plots.gif"):
+        # print(self.classes, self.video_filenames)
+        # quit()
+        for ic, class_name in enumerate(self.classes):
+            found_class = False    
+            for iv, v in enumerate(self.video_filenames):
+                curr_vid_class = v.split("/")[6]
+                if not found_class:
+                    if curr_vid_class == class_name:
+                        found_class = True
+                        self._show_video(iv + i, include_centroids, max_frames, outfile=f"{class_name}_plot.gif")
+
+
+
+
+        # pass
+        
+    def _show_video(self, i, include_centroids=False, max_frames=200, outfile = "plots.gif"):
+        i = abs(i)
+        print()
+        print("Generating Video...")
+        loop = tqdm(range(len(self.X[i][:(-1 if len(self.X[i]) < max_frames else max_frames)])))
+        # print(dim(loop))
+        # quit()
+
+        # ankles, l, r = self.ankle_distances(i, return_positions=True)
+        # peaks = self._find_peaks_for_video(i)[::2]
+        step_count = 1
+        
+        fig, ax = plt.subplots(3)
+        # ax = fig.add_subplot()
+        # ankle_ax = fig.add_subplot()
+        cap = [os.path.join(self.video_filenames[i], f) for f in os.listdir(self.video_filenames[i])]
+        # print(cap)
+        # quit()
+        if len(cap) == 0:
+            print(f"Error opening file {self.video_filenames[i]}")
+            quit()
+        frames = []
+        ax, vid_ax, vid_scat_ax = ax[0], ax[1], ax[2]
+        ax.invert_yaxis()
+        camera = Camera(fig)
+        
+        for a in loop:
+            print(a)
+            # if peaks[(step_count - 1) % len(peaks)] < a < peaks[(step_count) % len(peaks)] :
+            #     step_count += 1
+            curr_frame = []
+            # print(dim(self.X[i]))
+            # quit()
+            kps = self.X[i][a]
+            # ax.legend([f"Step Count: {step_count}"], loc='upper left')
+            # ankle_ax.plot(ankles[:a])
+            
+
+            coords = [k[:2] for k in kps]#[kps[a::self.num_dims] for a in range(self.num_dims)]
+            
+
+
+            # lines = [[]] * len(coords)
+            # for c in self.connections:
+            #     # print(self.kp_indices)
+            #     # print(a)
+            #     # quit()
+            #     # print(dim(coords))
+            #     # quit()
+
+            #     curr_points = [coords[self.kp_indices[con]] for con in c]
+            #     # print(dim(curr_points))
+            #     # quit()
+
+            #     ax.plot(curr_points[0], curr_points[1])
+
+                
+                # curr_frame.append(ax.plot(xline, yline, c='b'))
+            # print(*lines)
+            # quit()
+            # ax.plot(lines[0], lines[1])
+            # for k in range(len(lines[0])):
+
+            #     ax.plot([lines[0][k]], , c='b')
+
+            
+            # curr_frame.append(ax.scatter(x, y))
+            # frames.append([ax.scatter(x,y)])
+            # print(*lines[:2])
+            # quit()
+            # quit()
+            # ret, frame = cap.read()
+            print(cap[a])
+            # quit()
+            frame = cv2.imread(cap[a])
+            # print(frame)
+            # quit()
+            # cv2.imshow(frame)
+            # cv2.waitkey(0)
+            # if not ret:
+            #     print("There was an error")
+            #     quit()
+            im = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            vid_ax.imshow(im)
+            # print(dir(im))
+            # print(im.shape)
+            # quit()
+            # print([c[:2] for c in coords])
+            # print(self.X[i][a])
+            # quit()
+            def plot_points(curr_ax, mul_x = 1, mul_y=1, max_kp=-1):
+                curr_ax.scatter(coords[0][0] * mul_x, coords[0][1] * mul_y, c='r')
+                curr_ax.scatter([c[0]   * mul_x for c in coords[1:max_kp]], [c[1]  * mul_y for c in coords[1:max_kp]], c='b')
+                for c in self.connections:
+                    curr_points = [coords[self.kp_indices[con]] for con in c]
+                
+                    curr_ax.plot(
+                        [curr_points[1][0]* mul_x, curr_points[0][0]* mul_x ] , 
+                        [curr_points[1][1] * mul_y, curr_points[0][1] * mul_y ], c="g")
+            plot_points(ax)
+            plot_points(vid_scat_ax, mul_x=im.shape[1], mul_y=im.shape[0])
+            # ax.invert_yaxis()
+            # ax.scatter(coords[0][0], coords[0][1], c='r')
+            # ax.scatter([c[0] for c in coords[1:]], [c[1] for c in coords[1:]], c='b')
+            # vid_scat_ax.scatter(coords[0][0], coords[0][1], c='r')
+            # vid_scat_ax.scatter([c[0] * im.shape[0] for c in coords[1:]], [c[1] * im.shape[1] for c in coords[1:]], c='b')
+            vid_scat_ax.imshow(im)
+            camera.snap()
+            loop.set_postfix()
+        # fig.savefig("3d.png")
+        print("Rendering Video")
+        # ani = animation.ArtistAnimation(fig, frames, interval=50)
+        animation = camera.animate() 
+        print("Writing Video")
+        if not os.path.exists("gifs"):
+            os.makedirs("gifs")
+        path_out = os.path.join("gifs", outfile)
+        animation.save(path_out, writer='imagemagick', progress_callback=cell_callback_factory(len(self.X[i][:(-1 if len(self.X[i]) < max_frames else max_frames)])))
+        # ani.save('movie.mp4')
+        # quit()
 
     def convert_to_one_hot(self):
         onehot_mat = np.zeros((len(self.y), self.n_classes))
@@ -393,7 +565,24 @@ class HMDBDataset(GenericGaitDataset):
         videos = []
         z_data = []
         vid_filenames = []
-        classe_names = os.listdir(self.directory)[:max_classes]
+        classe_names = os.listdir(self.directory)
+        if self.exclude_classes is not None:
+            tmp = {}
+            for i, c in enumerate(classe_names):
+                tmp[c] = i
+            for ex in self.exclude_classes:
+                # print(f"REMOVIGN {ex}")
+                if type(ex) == str:
+                    tmp.pop(ex)
+                elif type(ex) == int:
+                    tmp.popitem(ex)
+            
+            classe_names = list(tmp.keys())
+        # print(len(classe_names))
+        if max_classes is not None:
+            classe_names = classe_names[:max_classes] if len(classe_names) > max_classes else classe_names
+        # print(classe_names, len(classe_names), max_classes)
+        # quit()
         classes = []
 
         
@@ -421,7 +610,7 @@ class HMDBDataset(GenericGaitDataset):
                 os.makedirs(f"cached/")
 
             for i, vid in enumerate(loop):
-                if os.path.exists(f"cached/{vid}.txt"):
+                if os.path.exists(f"cached/{vid}.txt") and READ_FROM_CACHE:
                     # to_append, z_datum = read_from_cached_file(f"cached/{vid}.txt")
                     ret_val = read_from_cached_file(f"cached/{vid}.txt")
                     
@@ -437,7 +626,7 @@ class HMDBDataset(GenericGaitDataset):
                         to_append = [[a, b, c, d[0]] for ((a, b, c), (d)) in zip(to_append, z_datum)]
                         videos.append(to_append)
                         z_class_vids.append(z_datum)
-                        vid_filenames.append(os.path.join(self.directory, vid))
+                        vid_filenames.append(os.path.join(self.directory,class_name, vid))
                         classes.append(class_idx)
                 else:
                     print(f"[{class_idx + 1} / {len(classe_names)}]File cached/{vid}.txt doesn't exist, creating")
@@ -446,10 +635,13 @@ class HMDBDataset(GenericGaitDataset):
                     if c is not None:
                         videos.append(c)
                         vid_filenames.append(filename)
-                        write_to_file(f"cached/{vid}.txt", c)
+                        if WRITE_TO_CACHE:
+                            write_to_file(f"cached/{vid}.txt", c)
                         classes.append(class_idx)
                     else:
-                        write_to_file(f"cached/{vid}.txt", "")
+                        # pass
+                        if WRITE_TO_CACHE:
+                            write_to_file(f"cached/{vid}.txt", "")
             # videos.append(class_vids)
             # z_data.append(z_class_vids)
             # print([len(v)//33 for v in videos])
@@ -471,6 +663,8 @@ class HMDBDataset(GenericGaitDataset):
        
 
         self.video_filenames = vid_filenames
+        # print(self.video_filenames)
+        # quit()
         self.classes = classe_names
         return videos, kp_dict, classes
             

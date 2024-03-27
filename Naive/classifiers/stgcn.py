@@ -23,7 +23,7 @@ torch.set_default_dtype(torch.double)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 SAVE_MODEL = 5
-LOAD_MODEL = True
+LOAD_MODEL = False
 MODEL_NAME = "model_checkpoints"
 
 def force_cudnn_initialization():
@@ -56,7 +56,7 @@ def weights_init(module_, bs=1):
 
 
 class GraphConvolution(nn.Module):
-    def __init__(self, in_channels, out_channels, A, cuda_, dropout=0.5):
+    def __init__(self, in_channels, out_channels, A, cuda_, dropout=0.0):
         super(GraphConvolution, self).__init__()
         self.cuda_ = cuda_
         self.graph_attn = nn.Parameter(torch.from_numpy(A.astype(np.float32))) #graph_attn is the neighbourhoods - how is it represented?
@@ -215,6 +215,7 @@ class STGCN:
         self.time_steps = self.train_set.X.size()[2]
         ds = self.train_set
         self.n_classes = ds.n_classes
+        self.class_names = ds.classes
         self.n_point = ds.n_point
         self.num_person = 1
         self.in_channels = 2
@@ -334,7 +335,7 @@ class STGCN:
 
         if optimizer is None:
             # optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-4)
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=0)
 
         writer = SummaryWriter()
 
@@ -403,7 +404,7 @@ class STGCN:
             # fig = plt.figure()
             # image = torch.image.decode_png(fig.getvalue(), channels=4)
 
-            sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False)
+            sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names)
             plt.xlabel("Predicted")
             plt.ylabel("True")
             # plt.imshow(hm)

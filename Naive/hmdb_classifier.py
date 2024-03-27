@@ -6,6 +6,7 @@ class CASIATorchDataset(Dataset):
     def __init__(self, ds):
         self.ds = ds
         self.n_classes = ds.n_classes
+        self.classes = ds.classes
         self.in_edge = ds.in_edge
         self.n_point = ds.X.shape[3]
         self.X = self.ds.X
@@ -22,6 +23,7 @@ class TrainValDataset(Dataset):
     def __init__(self, ds, X, y):
         self.ds = ds
         self.n_classes = ds.n_classes
+        self.classes = ds.classes
         self.in_edge = ds.in_edge
         self.n_point = ds.X.shape[3]
         self.X = X
@@ -36,7 +38,23 @@ class TrainValDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
-my_ds = HMDBDataset(generate_test_video=None, max_samples=None)
+exclude = [
+    'brush_hair',
+    'chew',
+    'catch',
+    'eat',
+    'smoke',
+    'laugh',
+    'kiss',
+    'hug',
+    'cartwheel',
+    'draw_sword',
+    'fall_floor',
+    'run',
+    'turn'
+
+]
+my_ds = HMDBDataset(generate_test_video=None, max_samples=120, max_classes=None, exclude_classes=exclude)
 
 X_train, X_test, y_train, y_test = train_test_split(my_ds.X, my_ds.y, test_size=0.1, shuffle=True, stratify=my_ds.y)
 X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.3, shuffle=True, stratify=y_train)
