@@ -56,7 +56,7 @@ def weights_init(module_, bs=1):
 
 
 class GraphConvolution(nn.Module):
-    def __init__(self, in_channels, out_channels, A, cuda_, dropout=0.0):
+    def __init__(self, in_channels, out_channels, A, cuda_, dropout=0.1):
         super(GraphConvolution, self).__init__()
         self.cuda_ = cuda_
         self.graph_attn = nn.Parameter(torch.from_numpy(A.astype(np.float32))) #graph_attn is the neighbourhoods - how is it represented?
@@ -335,7 +335,7 @@ class STGCN:
 
         if optimizer is None:
             # optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=0)
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-2)
 
         writer = SummaryWriter()
 
@@ -364,7 +364,7 @@ class STGCN:
                     scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(train_iter)
                 
                 train_iter.set_postfix(train_metrics["scalar"])
-            sns.heatmap(train_metrics["image"]["conf_mat"], annot=False)
+            sns.heatmap(train_metrics["image"]["conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
             plt.xlabel("Predicted")
             plt.ylabel("True")
             writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
@@ -404,7 +404,7 @@ class STGCN:
             # fig = plt.figure()
             # image = torch.image.decode_png(fig.getvalue(), channels=4)
 
-            sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names)
+            sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
             plt.xlabel("Predicted")
             plt.ylabel("True")
             # plt.imshow(hm)
