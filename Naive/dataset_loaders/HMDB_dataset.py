@@ -26,7 +26,7 @@ pose = mp_pose.Pose(min_detection_confidence=0.8, min_tracking_confidence=0.8, s
 hog = cv2.HOGDescriptor()
 hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 
-READ_FROM_CACHE = False
+READ_FROM_CACHE = True
 WRITE_TO_CACHE = True
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -200,7 +200,7 @@ class HMDBDataset(GenericGaitDataset):
         # print(self.y)
         # quit()
         # sns.histplot(np.array(self.y), x=self.classes)
-        _, counts = np.unique(self.y, return_counts=True)
+        y_unique, counts = np.unique(self.y, return_counts=True)
         plt.figure()
         plt.bar(self.classes, counts)
         plt.xticks(rotation=90)
@@ -687,11 +687,15 @@ class HMDBDataset(GenericGaitDataset):
         # print(classes, classe_names)
         # quit()
         i = 0
+        j = 0
         while(i < len(classe_names)):
-            if classes.count(i) == 0:
+            if classes.count(j) == 0:
+                print(f"Popping {i}")
                 classe_names.pop(i)
+                j += 1
             else:
                 i += 1
+                j += 1
 
         for i, val in enumerate(np.unique(classes)):
             classes = [i if x==val else x for x in classes]
