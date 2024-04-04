@@ -217,7 +217,7 @@ class STGCN:
         self.n_classes = ds.n_classes
         self.class_names = ds.classes
         self.n_point = ds.n_point
-        self.num_person = 1
+        self.num_person = 2
         self.in_channels = 2
         self.loss_fn = loss_fn
 

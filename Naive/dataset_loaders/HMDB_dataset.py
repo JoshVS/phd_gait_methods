@@ -22,7 +22,11 @@ import mediapipe as mp
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose(min_detection_confidence=0.8, min_tracking_confidence=0.8, smooth_landmarks=True)
 
-READ_FROM_CACHE = True
+
+hog = cv2.HOGDescriptor()
+hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+
+READ_FROM_CACHE = False
 WRITE_TO_CACHE = True
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -58,8 +62,8 @@ def read_from_cached_file(filename, min_samples=2):
     z_data = []
     for line in lines:
         if line == "": continue
-        kp, x, y, z = line.split(";")
-        curr_data.append([kp, float(x), float(y)])
+        i, kp, x, y, z = line.split(";")
+        curr_data.append([int(i), kp, float(x), float(y)])
         z_data.append([float(z)])
     if curr_data == [] or (len(curr_data) // 33) < min_samples:
         return None
@@ -71,6 +75,7 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
     # TODO
     
     frames = os.listdir(filename)
+
     frame_results = []
     for frame in frames:
         curr_frame = []
@@ -81,19 +86,43 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
             os.path.join(filename, frame)
         )
         image = cv2.resize(image, (im_height, im_width), interpolation=cv2.INTER_LINEAR)
+
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        boxes, weights = hog.detectMultiScale(gray, winStride=(8,8))
+        if len(boxes) == 0:
+            continue
+        num_boxes = 2 if len(boxes) > 2 else 1
+        boxes = boxes[:num_boxes]
+        boxes = np.array([[x, y, x + w, y + h] for (x, y, w, h) in boxes])
+        
+
+
+
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        pose_results = pose.process(image)
-        # print(dir(pose_results))
-        # quit()
-        if pose_results.pose_landmarks is not None:
-            for k in kp_dict.keys():
-                v = kp_dict[k]
-                curr_frame.append([k, pose_results.pose_landmarks.landmark[v].x, pose_results.pose_landmarks.landmark[v].y, pose_results.pose_landmarks.landmark[v].z])
-                # print(dir(pose_results.pose_world_landmarks))
-                # quit()
-        frame_results.extend(curr_frame)
-    if len(frame_results) < (min_frames*len(kp_dict.keys())):
+        found_frame = False
+        for i in range(2):
+            if i >= len(boxes):
+                for k in kp_dict.keys():
+                    curr_frame.append([i, k, 0, 0, 0])
+                continue
+            xA, yA, xB, yB = boxes[i]
+            cropped = image[yA:yB, xA:xB]
+
+            pose_results = pose.process(cropped)
+            # print(dir(pose_results))
+            # quit()
+            if pose_results.pose_landmarks is not None:
+                found_frame = True
+                for k in kp_dict.keys():
+                    v = kp_dict[k]
+                    curr_frame.append([i, k, pose_results.pose_landmarks.landmark[v].x, pose_results.pose_landmarks.landmark[v].y, pose_results.pose_landmarks.landmark[v].z])
+                    # print(dir(pose_results.pose_world_landmarks))
+                    # quit()
+        if found_frame:
+            frame_results.extend(curr_frame)
+    if len(frame_results) < (min_frames*len(kp_dict.keys()) * 2):
         print(f"{filename} has less than {min_frames} frames, skipping")
         return None
     return frame_results
@@ -144,7 +173,7 @@ class HMDBDataset(GenericGaitDataset):
         
         
         self.X = self.reshape_skeletons()
-        # print(self.X)
+        # print(dim(self.X))
         # quit()
         
         
@@ -351,16 +380,21 @@ class HMDBDataset(GenericGaitDataset):
         # print([len(x) for x in self.X])
         # quit()
         for i in range(len(self.X)):
-            curr_sample = self.X[i]
-            x = np.arange(len(curr_sample))
-            # print(len(curr_sample), i, len(self.X))
-            f = interp1d(x, curr_sample, axis=0)
-            xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
-            # print(xnew, len(curr_sample))
-            # quit()
-            y_old = f(x)
-            ynew = f(xnew)
-            self.X[i] = ynew
+            for j in range(len(self.X[i])):
+                curr_sample = self.X[i][j]
+                x = np.arange(len(curr_sample))
+                # print(len(curr_sample), i, len(self.X))
+                print(dim(curr_sample), i, j)
+                # quit()
+                f = interp1d(x, curr_sample, axis=0)
+                xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
+                # print(xnew, len(curr_sample))
+                # quit()
+                # y_old = f(x)
+                print(xnew, len(curr_sample))
+                # quit()
+                ynew = f(xnew)
+                self.X[i][j] = ynew
         if convert_to_numpy:
             self.X = np.array(self.X, dtype=np.double)
 
@@ -523,13 +557,12 @@ class HMDBDataset(GenericGaitDataset):
         reshaped_z_data = []
         for i, person in enumerate(self.skel_data):
             # reshaped_skel.append([])
-            reshaped_skel.append([])
+            reshaped_skel.append([[],[]])
             for l in person:
-                
-                
-                if l[0] == self.headpoint:
-                    reshaped_skel[-1].append([])
-                reshaped_skel[-1][-1].append(l[1:])
+                # quit()
+                if l[1] == self.headpoint:
+                    reshaped_skel[-1][l[0]].append([])
+                reshaped_skel[-1][l[0]][-1].append(l[2:])
             
         return reshaped_skel
 
@@ -623,7 +656,7 @@ class HMDBDataset(GenericGaitDataset):
                     # quit()
                     if ret_val is not None:
                         to_append, z_datum = ret_val
-                        to_append = [[a, b, c, d[0]] for ((a, b, c), (d)) in zip(to_append, z_datum)]
+                        to_append = [[ind, a, b, c, d[0]] for ((ind, a, b, c), (d)) in zip(to_append, z_datum)]
                         videos.append(to_append)
                         z_class_vids.append(z_datum)
                         vid_filenames.append(os.path.join(self.directory,class_name, vid))
@@ -632,6 +665,8 @@ class HMDBDataset(GenericGaitDataset):
                     print(f"[{class_idx + 1} / {len(classe_names)}]File cached/{vid}.txt doesn't exist, creating")
                     filename = os.path.join(self.directory, class_name, vid)
                     c = get_kp_from_file(filename, kp_dict)
+                    # print(c)
+                    # quit()
                     if c is not None:
                         videos.append(c)
                         vid_filenames.append(filename)
@@ -801,13 +836,15 @@ class HMDBDataset(GenericGaitDataset):
 
     def adjust_input_data(self, X):
         X = X[...,:-1] # Remove Z Dimension
-        X = X.reshape(X.shape + (1,))
+        # X = X.reshape(X.shape + (1,))
         # print(X.shape)
         N = 0
-        C = 3
-        T = 1
-        V = 2
-        M = 4
+        C = 4
+        T = 2
+        V = 3
+        M = 1
+        # print(X.shape)
+        # quit()
         X = X.transpose(N, C, T, V, M)
         # print(X.shape)
         return torch.tensor(X, dtype=torch.double)
