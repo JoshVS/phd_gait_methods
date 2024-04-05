@@ -26,6 +26,12 @@ SAVE_MODEL = 5
 LOAD_MODEL = False
 MODEL_NAME = "model_checkpoints"
 
+DROPOUT = 0.75
+WEIGHT_DECAY = 1e-2
+
+EPOCHS = 100
+LR = 1e-3
+
 def force_cudnn_initialization():
     if device == "cuda":
         s = 32
@@ -56,7 +62,7 @@ def weights_init(module_, bs=1):
 
 
 class GraphConvolution(nn.Module):
-    def __init__(self, in_channels, out_channels, A, cuda_, dropout=0.1):
+    def __init__(self, in_channels, out_channels, A, cuda_, dropout=DROPOUT):
         super(GraphConvolution, self).__init__()
         self.cuda_ = cuda_
         self.graph_attn = nn.Parameter(torch.from_numpy(A.astype(np.float32))) #graph_attn is the neighbourhoods - how is it represented?
@@ -319,7 +325,7 @@ class STGCN:
         return val_metrics
 
 
-    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=0.01, momentum=0.9, epochs=1000, batch_size=32):
+    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=LR, momentum=0.9, epochs=EPOCHS, batch_size=32):
         # train_samples = int((1 - test_split) * len(self.ds))
         # test_samples = int(len(self.ds) - train_samples)
         # val_samples = int(val_split * train_samples)
@@ -335,7 +341,7 @@ class STGCN:
 
         if optimizer is None:
             # optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=1e-2)
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
 
         writer = SummaryWriter()
 

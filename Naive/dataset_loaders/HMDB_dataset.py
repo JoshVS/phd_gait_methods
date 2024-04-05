@@ -20,7 +20,7 @@ from celluloid import Camera
 
 import mediapipe as mp
 mp_pose = mp.solutions.pose
-pose = mp_pose.Pose(min_detection_confidence=0.8, min_tracking_confidence=0.8, smooth_landmarks=True)
+pose = mp_pose.Pose(min_detection_confidence=0.4, min_tracking_confidence=0.4, smooth_landmarks=True)
 
 
 hog = cv2.HOGDescriptor()
@@ -55,7 +55,7 @@ def _dim(l, check_for_error):
 def dim(l, check_for_error=False):
     return tuple(_dim(l, check_for_error))
 
-def read_from_cached_file(filename, min_samples=2):
+def read_from_cached_file(filename, min_samples=1):
     with open(filename, 'r') as in_file:
         lines = in_file.read().split("\n")
     curr_data = []
@@ -71,7 +71,7 @@ def read_from_cached_file(filename, min_samples=2):
     
         
 
-def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=256):
+def get_kp_from_file(filename, kp_dict, min_frames = 1, im_height=256, im_width=256):
     # TODO
     
     frames = os.listdir(filename)
@@ -89,7 +89,7 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
 
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        boxes, weights = hog.detectMultiScale(gray, winStride=(8,8))
+        boxes, weights = hog.detectMultiScale(gray, winStride=(4,4))
         if len(boxes) == 0:
             continue
         num_boxes = 2 if len(boxes) > 2 else 1
@@ -149,10 +149,11 @@ def write_to_file(filename, kps):
 
 class HMDBDataset(GenericGaitDataset):
 
-    def __init__(self, directory='../../../Datasets/HMDB51/HMDB51/', max_samples=None, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None):
+    def __init__(self, directory='../../../Datasets/HMDB51/HMDB51/', max_samples=None, min_samples=20, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None):
         
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.val_split = val_split
+        self.min_samples = min_samples
         self.exclude_classes = exclude_classes
         self.test_split = test_split
         self.max_classes = max_classes
@@ -382,17 +383,21 @@ class HMDBDataset(GenericGaitDataset):
         for i in range(len(self.X)):
             for j in range(len(self.X[i])):
                 curr_sample = self.X[i][j]
+                if len(curr_sample) == 1:
+                    self.X[i][j] = self.X[i][j] * min_frames
+                    continue
                 x = np.arange(len(curr_sample))
                 # print(len(curr_sample), i, len(self.X))
-                print(dim(curr_sample), i, j)
+                # print(dim(curr_sample), i, j)
                 # quit()
                 f = interp1d(x, curr_sample, axis=0)
                 xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
                 # print(xnew, len(curr_sample))
                 # quit()
                 # y_old = f(x)
-                print(xnew, len(curr_sample))
+                # print(xnew, len(curr_sample))
                 # quit()
+                # print(len(curr_sample))
                 ynew = f(xnew)
                 self.X[i][j] = ynew
         if convert_to_numpy:
@@ -628,11 +633,13 @@ class HMDBDataset(GenericGaitDataset):
             )
             
             if max_samples is None:
-                pass
+                maximum_num_samples = int(len(vids))
             elif 0 < max_samples < 1:
-                vids = vids[:int(len(vids) * max_samples)]
+                maximum_num_samples = int(len(vids) * max_samples)
+                # vids = vids[:int(len(vids) * max_samples)]
             elif max_samples < len(vids):
-                vids = vids[:int(max_samples)]
+                maximum_num_samples = max_samples
+                # vids = vids[:int(max_samples)]
             # classes.append(person_id)
             class_vids = []
             z_class_vids = []
@@ -641,6 +648,11 @@ class HMDBDataset(GenericGaitDataset):
             loop = tqdm(vids)
             if not os.path.exists(f"cached/"):
                 os.makedirs(f"cached/")
+            num_samples = 0
+            tmp_z = []
+            tmp_vids = []
+            tmp_vid_filenames = []
+            tmp_classes = []
 
             for i, vid in enumerate(loop):
                 if os.path.exists(f"cached/{vid}.txt") and READ_FROM_CACHE:
@@ -655,12 +667,13 @@ class HMDBDataset(GenericGaitDataset):
                   
                     # quit()
                     if ret_val is not None:
+                        num_samples += 1
                         to_append, z_datum = ret_val
                         to_append = [[ind, a, b, c, d[0]] for ((ind, a, b, c), (d)) in zip(to_append, z_datum)]
-                        videos.append(to_append)
-                        z_class_vids.append(z_datum)
-                        vid_filenames.append(os.path.join(self.directory,class_name, vid))
-                        classes.append(class_idx)
+                        tmp_vids.append(to_append)
+                        tmp_z.append(z_datum)
+                        tmp_vid_filenames.append(os.path.join(self.directory,class_name, vid))
+                        tmp_classes.append(class_idx)
                 else:
                     print(f"[{class_idx + 1} / {len(classe_names)}]File cached/{vid}.txt doesn't exist, creating")
                     filename = os.path.join(self.directory, class_name, vid)
@@ -668,15 +681,24 @@ class HMDBDataset(GenericGaitDataset):
                     # print(c)
                     # quit()
                     if c is not None:
-                        videos.append(c)
-                        vid_filenames.append(filename)
+                        num_samples += 1
+                        tmp_vids.append(c)
+                        tmp_vid_filenames.append(filename)
                         if WRITE_TO_CACHE:
                             write_to_file(f"cached/{vid}.txt", c)
-                        classes.append(class_idx)
+                        tmp_classes.append(class_idx)
                     else:
                         # pass
                         if WRITE_TO_CACHE:
                             write_to_file(f"cached/{vid}.txt", "")
+            if num_samples >= self.min_samples:
+                videos.extend(tmp_vids)
+                classes.extend(tmp_classes)
+                vid_filenames.extend(tmp_vid_filenames)
+                z_class_vids.extend(tmp_z)
+            elif num_samples == maximum_num_samples:
+                print("Reached Maximum Samples")
+                break
             # videos.append(class_vids)
             # z_data.append(z_class_vids)
             # print([len(v)//33 for v in videos])
