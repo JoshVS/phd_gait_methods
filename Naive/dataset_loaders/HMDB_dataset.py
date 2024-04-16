@@ -27,7 +27,7 @@ yolo_model = YOLO("yolov8x-pose-p6.pt")
 hog = cv2.HOGDescriptor()
 hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 
-READ_FROM_CACHE = False
+READ_FROM_CACHE = True
 WRITE_TO_CACHE = True
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -76,16 +76,23 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
     # TODO
     
     frames = os.listdir(filename)
+    # bounding_boxes = yolo_model([os.path.join(filename, f) for f in frames], save=False, verbose=False)
+    
 
     frame_results = []
-    for frame in frames:
+    for  frame in frames:
         curr_frame = []
+        bbox = yolo_model(os.path.join(filename, frame), save=False, verbose=False, stream=True)
+        boxes = []
+        for result in bbox:
+            boxes.append(result.boxes)
+
         # image = mp.Image.create_from_file(
         #     os.path.join(filename, frame)
         # ).numpy_view()
-        # print(os.path.join(filename, frame))
-        results = yolo_model(os.path.join(filename, frame), save=False, verbose=False)
-        boxes = [r.boxes.xyxy.cpu().numpy()[0] for r in results]
+        # results = yolo_model(os.path.join(filename, frame), save=False, verbose=False)
+        # boxes = [results[0].boxes.xyxy.cpu().numpy()[0] for r in results]
+        boxes = boxes[0].xyxyn.cpu().numpy()
         image = cv2.imread(
             os.path.join(filename, frame)
         )
@@ -108,7 +115,10 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
                 for k in kp_dict.keys():
                     curr_frame.append([i, k, 0, 0, 0])
                 continue
-            xA, yA, xB, yB = map(int, boxes[i])
+            xA, yA, xB, yB = boxes[i]
+            xA, xB = int(xA * im_width), int(xB * im_width)
+            yA, yB = int(yA * im_height), int(yB * im_height)
+            # print(xA, yA, xB, yB)
             cropped = image[yA:yB, xA:xB]
 
             pose_results = pose.process(cropped)
