@@ -18,7 +18,6 @@ from torchmetrics import Accuracy, Precision, Recall
 import seaborn as sns
 import matplotlib.pyplot as plt
 from torch.nn.functional import softmax
-torch.set_default_dtype(torch.double)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -216,6 +215,8 @@ class MarcSTGCN(nn.Module):
 
 class STGCN:
     def __init__(self, ds, loss_fn=torch.nn.functional.cross_entropy, model_name=MODEL_NAME):
+        
+        torch.set_default_dtype(torch.double)
         self.model_name = model_name
         self.train_set, self.test_set, self.val_set = ds
         self.time_steps = self.train_set.X.size()[2]

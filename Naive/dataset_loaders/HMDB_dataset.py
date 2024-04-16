@@ -9,7 +9,7 @@ from .genericdataset import GenericGaitDataset
 import seaborn as sns
 import matplotlib.pyplot as plt
 import plotly.express as px
-
+from ultralytics import YOLO
 import torch
 from scipy.interpolate import interp1d
 # matplotlib.use('TkAgg')
@@ -21,12 +21,13 @@ from celluloid import Camera
 import mediapipe as mp
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose(min_detection_confidence=0.4, min_tracking_confidence=0.4, smooth_landmarks=True)
-
+torch.set_default_dtype(torch.float32)
+yolo_model = YOLO("yolov8x-pose-p6.pt")
 
 hog = cv2.HOGDescriptor()
 hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 
-READ_FROM_CACHE = True
+READ_FROM_CACHE = False
 WRITE_TO_CACHE = True
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -55,7 +56,7 @@ def _dim(l, check_for_error):
 def dim(l, check_for_error=False):
     return tuple(_dim(l, check_for_error))
 
-def read_from_cached_file(filename, min_samples=1):
+def read_from_cached_file(filename, min_samples=2):
     with open(filename, 'r') as in_file:
         lines = in_file.read().split("\n")
     curr_data = []
@@ -65,13 +66,13 @@ def read_from_cached_file(filename, min_samples=1):
         i, kp, x, y, z = line.split(";")
         curr_data.append([int(i), kp, float(x), float(y)])
         z_data.append([float(z)])
-    if curr_data == [] or (len(curr_data) // 33) < min_samples:
+    if curr_data == [] or (len(curr_data) // 33) * 2 < min_samples:
         return None
     return curr_data, z_data
     
         
 
-def get_kp_from_file(filename, kp_dict, min_frames = 1, im_height=256, im_width=256):
+def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=256):
     # TODO
     
     frames = os.listdir(filename)
@@ -82,19 +83,19 @@ def get_kp_from_file(filename, kp_dict, min_frames = 1, im_height=256, im_width=
         # image = mp.Image.create_from_file(
         #     os.path.join(filename, frame)
         # ).numpy_view()
+        # print(os.path.join(filename, frame))
+        results = yolo_model(os.path.join(filename, frame), save=False, verbose=False)
+        boxes = [r.boxes.xyxy.cpu().numpy()[0] for r in results]
         image = cv2.imread(
             os.path.join(filename, frame)
         )
         image = cv2.resize(image, (im_height, im_width), interpolation=cv2.INTER_LINEAR)
 
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        boxes, weights = hog.detectMultiScale(gray, winStride=(4,4))
         if len(boxes) == 0:
             continue
         num_boxes = 2 if len(boxes) > 2 else 1
         boxes = boxes[:num_boxes]
-        boxes = np.array([[x, y, x + w, y + h] for (x, y, w, h) in boxes])
+        # boxes = np.array([[x, y, x + w, y + h] for (x, y, w, h) in boxes])
         
 
 
@@ -107,7 +108,7 @@ def get_kp_from_file(filename, kp_dict, min_frames = 1, im_height=256, im_width=
                 for k in kp_dict.keys():
                     curr_frame.append([i, k, 0, 0, 0])
                 continue
-            xA, yA, xB, yB = boxes[i]
+            xA, yA, xB, yB = map(int, boxes[i])
             cropped = image[yA:yB, xA:xB]
 
             pose_results = pose.process(cropped)
@@ -161,6 +162,7 @@ class HMDBDataset(GenericGaitDataset):
         self.initialise_stuff()
 
     def initialise_stuff(self):
+        torch.set_default_dtype(torch.float32)
         self.skel_data, self.kp_indices, self.labels = self._get_file_data(self.max_samples, self.max_classes) # (n_people, n_files, n_lines, 3)
         # print(self.skel_data)
         # quit()
@@ -639,6 +641,8 @@ class HMDBDataset(GenericGaitDataset):
                 # vids = vids[:int(len(vids) * max_samples)]
             elif max_samples < len(vids):
                 maximum_num_samples = max_samples
+            else:
+                maximum_num_samples = int(len(vids))
                 # vids = vids[:int(max_samples)]
             # classes.append(person_id)
             class_vids = []
@@ -691,14 +695,15 @@ class HMDBDataset(GenericGaitDataset):
                         # pass
                         if WRITE_TO_CACHE:
                             write_to_file(f"cached/{vid}.txt", "")
+                
+                if num_samples == maximum_num_samples:
+                    print("Reached Maximum Samples")
+                    break
             if num_samples >= self.min_samples:
                 videos.extend(tmp_vids)
                 classes.extend(tmp_classes)
                 vid_filenames.extend(tmp_vid_filenames)
                 z_class_vids.extend(tmp_z)
-            elif num_samples == maximum_num_samples:
-                print("Reached Maximum Samples")
-                break
             # videos.append(class_vids)
             # z_data.append(z_class_vids)
             # print([len(v)//33 for v in videos])

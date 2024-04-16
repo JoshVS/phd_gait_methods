@@ -71,7 +71,7 @@ exclude = [
 ]
 exclude=None
 my_ds = HMDBDataset(generate_test_video=None, 
-                    max_samples=200,
+                    max_samples=120,
                     max_classes=None, 
                     min_samples = 10, 
                     exclude_classes=exclude, 
