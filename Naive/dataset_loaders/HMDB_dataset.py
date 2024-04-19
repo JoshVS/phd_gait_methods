@@ -72,6 +72,73 @@ def read_from_cached_file(filename, min_samples=2):
     
         
 
+# def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=256):
+#     # TODO
+    
+#     frames = os.listdir(filename)
+#     # bounding_boxes = yolo_model([os.path.join(filename, f) for f in frames], save=False, verbose=False)
+    
+
+#     frame_results = []
+#     for  frame in frames:
+#         curr_frame = []
+#         bbox = yolo_model(os.path.join(filename, frame), save=False, verbose=False, stream=True)
+#         boxes = []
+#         for result in bbox:
+#             boxes.append(result.boxes)
+
+#         # image = mp.Image.create_from_file(
+#         #     os.path.join(filename, frame)
+#         # ).numpy_view()
+#         # results = yolo_model(os.path.join(filename, frame), save=False, verbose=False)
+#         # boxes = [results[0].boxes.xyxy.cpu().numpy()[0] for r in results]
+#         boxes = boxes[0].xyxyn.cpu().numpy()
+#         image = cv2.imread(
+#             os.path.join(filename, frame)
+#         )
+#         image = cv2.resize(image, (im_height, im_width), interpolation=cv2.INTER_LINEAR)
+
+#         if len(boxes) == 0:
+#             continue
+#         num_boxes = 2 if len(boxes) > 2 else 1
+#         boxes = boxes[:num_boxes]
+#         # boxes = np.array([[x, y, x + w, y + h] for (x, y, w, h) in boxes])
+        
+
+
+
+#         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+#         found_frame = False
+#         for i in range(2):
+#             if i >= len(boxes):
+#                 for k in kp_dict.keys():
+#                     curr_frame.append([i, k, 0, 0, 0])
+#                 continue
+#             xA, yA, xB, yB = boxes[i]
+#             xA, xB = int(xA * im_width), int(xB * im_width)
+#             yA, yB = int(yA * im_height), int(yB * im_height)
+#             # print(xA, yA, xB, yB)
+#             cropped = image[yA:yB, xA:xB]
+
+#             pose_results = pose.process(cropped)
+#             # print(dir(pose_results))
+#             # quit()
+#             if pose_results.pose_landmarks is not None:
+#                 found_frame = True
+#                 for k in kp_dict.keys():
+#                     v = kp_dict[k]
+#                     curr_frame.append([i, k, pose_results.pose_landmarks.landmark[v].x, pose_results.pose_landmarks.landmark[v].y, pose_results.pose_landmarks.landmark[v].z])
+#                     # print(dir(pose_results.pose_world_landmarks))
+#                     # quit()
+#         if found_frame:
+#             frame_results.extend(curr_frame)
+#     if len(frame_results) < (min_frames*len(kp_dict.keys()) * 2):
+#         print(f"{filename} has less than {min_frames} frames, skipping")
+#         return None
+#     return frame_results
+
+
 def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=256):
     # TODO
     
@@ -82,53 +149,30 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
     frame_results = []
     for  frame in frames:
         curr_frame = []
-        bbox = yolo_model(os.path.join(filename, frame), save=False, verbose=False, stream=True)
-        boxes = []
-        for result in bbox:
-            boxes.append(result.boxes)
 
-        # image = mp.Image.create_from_file(
-        #     os.path.join(filename, frame)
-        # ).numpy_view()
-        # results = yolo_model(os.path.join(filename, frame), save=False, verbose=False)
-        # boxes = [results[0].boxes.xyxy.cpu().numpy()[0] for r in results]
-        boxes = boxes[0].xyxyn.cpu().numpy()
-        image = cv2.imread(
-            os.path.join(filename, frame)
-        )
-        image = cv2.resize(image, (im_height, im_width), interpolation=cv2.INTER_LINEAR)
-
-        if len(boxes) == 0:
-            continue
-        num_boxes = 2 if len(boxes) > 2 else 1
-        boxes = boxes[:num_boxes]
-        # boxes = np.array([[x, y, x + w, y + h] for (x, y, w, h) in boxes])
-        
-
-
-
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
+      
         found_frame = False
+        results_generator = yolo_model(source=os.path.join(filename, frame), show=False, conf=0.3, save=False, stream=True, verbose=False)
         for i in range(2):
-            if i >= len(boxes):
-                for k in kp_dict.keys():
-                    curr_frame.append([i, k, 0, 0, 0])
-                continue
-            xA, yA, xB, yB = boxes[i]
-            xA, xB = int(xA * im_width), int(xB * im_width)
-            yA, yB = int(yA * im_height), int(yB * im_height)
-            # print(xA, yA, xB, yB)
-            cropped = image[yA:yB, xA:xB]
-
-            pose_results = pose.process(cropped)
-            # print(dir(pose_results))
-            # quit()
-            if pose_results.pose_landmarks is not None:
-                found_frame = True
+            for k in kp_dict.keys():
+                curr_frame.append([i, k, 0, 0])
+        for i, res in enumerate(results_generator):
+            if i >= 2:
+                break
+            
+            kpts = res.keypoints.xyn.cpu().numpy()[0, ...] # Shape (17, 2)
+            if kpts.shape[0] != 0:
+                found_frame = True  
                 for k in kp_dict.keys():
                     v = kp_dict[k]
-                    curr_frame.append([i, k, pose_results.pose_landmarks.landmark[v].x, pose_results.pose_landmarks.landmark[v].y, pose_results.pose_landmarks.landmark[v].z])
+                    curr_frame[kpts.shape[0] * i + v] = [i, k, kpts[v, 0], kpts[v, 1]]
+        
+
+            # if pose_results.pose_landmarks is not None:
+            #     found_frame = True
+            #     for k in kp_dict.keys():
+            #         v = kp_dict[k]
+            #         curr_frame.append([i, k, pose_results.pose_landmarks.landmark[v].x, pose_results.pose_landmarks.landmark[v].y, pose_results.pose_landmarks.landmark[v].z])
                     # print(dir(pose_results.pose_world_landmarks))
                     # quit()
         if found_frame:
@@ -137,8 +181,6 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
         print(f"{filename} has less than {min_frames} frames, skipping")
         return None
     return frame_results
-
-
 
 
 def write_to_file(filename, kps):
@@ -743,43 +785,27 @@ class HMDBDataset(GenericGaitDataset):
         # quit()
         self.classes = classe_names
         return videos, kp_dict, classes
-            
+
 
     def _get_file_data(self, max_samples, max_classes):
         keypoints_arr = [
             "nose",
-            "left_eye_inner",
             "left_eye",
-            "left_eye_outer",
-            "right_eye_inner",
             "right_eye",
-            "right_eye_outer",
             "left_ear",
             "right_ear",
-            "mouth_left",
-            "mouth_right",
             "left_shoulder",
             "right_shoulder",
             "left_elbow",
             "right_elbow",
             "left_wrist",
             "right_wrist",
-            "left_pinky",
-            "right_pinky",
-            "left_index",
-            "right_index",
-            "left_thumb",
-            "right_thumb",
             "left_hip",
             "right_hip",
             "left_knee",
             "right_knee",
             "left_ankle",
             "right_ankle",
-            "left_heel",
-            "right_heel",
-            "left_foot_index",
-            "right_foot_index"
         ]
         kp_dict = {}
         for i, s in enumerate(keypoints_arr):
@@ -789,32 +815,21 @@ class HMDBDataset(GenericGaitDataset):
 
     def setup_information(self):               
         self.connections = [
-            ('nose', 'right_eye_inner'),
-            ('nose', 'left_eye_inner'),
-            ('left_eye_inner', 'left_eye'),
-            ('left_eye', 'left_eye_outer'),
-            ('left_eye_outer', 'left_ear'),
+            ('nose', 'left_eye'),
+            ('nose', 'right_eye'),
+            ('left_eye', 'left_ear'),
+            ('right_eye', 'right_ear'),
+            ('left_ear', 'left_shoulder'),
+            ('right_ear', 'right_shoulder'),
+            ('right_shoulder', 'left_shoulder'),
             
-            ('right_eye_inner', 'right_eye'),
-            ('right_eye', 'right_eye_outer'),
-            ('right_eye_outer', 'right_ear'),
-
-            ('mouth_left', 'mouth_right'),
-
-            ('left_shoulder', 'right_shoulder'),
 
             ('left_shoulder', 'left_elbow'),
             ('left_elbow', 'left_wrist'),
-            ('left_wrist', 'left_thumb'),
-            ('left_wrist', 'left_index'),
-            ('left_wrist', 'left_pinky'),
 
             
             ('right_shoulder', 'right_elbow'),
             ('right_elbow', 'right_wrist'),
-            ('right_wrist', 'right_thumb'),
-            ('right_wrist', 'right_index'),
-            ('right_wrist', 'right_pinky'),
 
             ('right_shoulder', 'right_hip'),
             ('left_shoulder', 'left_hip'),
@@ -822,14 +837,10 @@ class HMDBDataset(GenericGaitDataset):
 
             ('left_hip', 'left_knee'),
             ('left_knee', 'left_ankle'),
-            ('left_ankle', 'left_heel'),
-            ('left_ankle', 'left_foot_index'),
 
             
             ('right_hip', 'right_knee'),
             ('right_knee', 'right_ankle'),
-            ('right_ankle', 'right_heel'),
-            ('right_ankle', 'right_foot_index'),
 
         ]
 
@@ -841,14 +852,10 @@ class HMDBDataset(GenericGaitDataset):
 
         self.upper_torso = [
             "nose",
-            "right_eye_inner",
             "right_eye",
-            "right_eye_outer",
             "right_ear",
             
-            "left_eye_inner",
             "left_eye",
-            "left_eye_outer",
             "left_ear",
 
             "left_shoulder",
@@ -868,6 +875,131 @@ class HMDBDataset(GenericGaitDataset):
         self.left_wrist = "left_wrist"
         self.left_ankle = "left_ankle"
         self.right_ankle = "right_ankle"
+
+
+    # def _get_file_data(self, max_samples, max_classes):
+    #     keypoints_arr = [
+    #         "nose",
+    #         "left_eye_inner",
+    #         "left_eye",
+    #         "left_eye_outer",
+    #         "right_eye_inner",
+    #         "right_eye",
+    #         "right_eye_outer",
+    #         "left_ear",
+    #         "right_ear",
+    #         "mouth_left",
+    #         "mouth_right",
+    #         "left_shoulder",
+    #         "right_shoulder",
+    #         "left_elbow",
+    #         "right_elbow",
+    #         "left_wrist",
+    #         "right_wrist",
+    #         "left_pinky",
+    #         "right_pinky",
+    #         "left_index",
+    #         "right_index",
+    #         "left_thumb",
+    #         "right_thumb",
+    #         "left_hip",
+    #         "right_hip",
+    #         "left_knee",
+    #         "right_knee",
+    #         "left_ankle",
+    #         "right_ankle",
+    #         "left_heel",
+    #         "right_heel",
+    #         "left_foot_index",
+    #         "right_foot_index"
+    #     ]
+    #     kp_dict = {}
+    #     for i, s in enumerate(keypoints_arr):
+    #         kp_dict[s] = i
+    #     return self.create_file_data(kp_dict, max_samples, max_classes)
+        
+
+    # def setup_information(self):               
+    #     self.connections = [
+    #         ('nose', 'right_eye_inner'),
+    #         ('nose', 'left_eye_inner'),
+    #         ('left_eye_inner', 'left_eye'),
+    #         ('left_eye', 'left_eye_outer'),
+    #         ('left_eye_outer', 'left_ear'),
+            
+    #         ('right_eye_inner', 'right_eye'),
+    #         ('right_eye', 'right_eye_outer'),
+    #         ('right_eye_outer', 'right_ear'),
+
+    #         ('mouth_left', 'mouth_right'),
+
+    #         ('left_shoulder', 'right_shoulder'),
+
+    #         ('left_shoulder', 'left_elbow'),
+    #         ('left_elbow', 'left_wrist'),
+    #         ('left_wrist', 'left_thumb'),
+    #         ('left_wrist', 'left_index'),
+    #         ('left_wrist', 'left_pinky'),
+
+            
+    #         ('right_shoulder', 'right_elbow'),
+    #         ('right_elbow', 'right_wrist'),
+    #         ('right_wrist', 'right_thumb'),
+    #         ('right_wrist', 'right_index'),
+    #         ('right_wrist', 'right_pinky'),
+
+    #         ('right_shoulder', 'right_hip'),
+    #         ('left_shoulder', 'left_hip'),
+    #         ('right_hip', 'left_hip'),
+
+    #         ('left_hip', 'left_knee'),
+    #         ('left_knee', 'left_ankle'),
+    #         ('left_ankle', 'left_heel'),
+    #         ('left_ankle', 'left_foot_index'),
+
+            
+    #         ('right_hip', 'right_knee'),
+    #         ('right_knee', 'right_ankle'),
+    #         ('right_ankle', 'right_heel'),
+    #         ('right_ankle', 'right_foot_index'),
+
+    #     ]
+
+    #     self.edge_matrix = [[self.kp_indices[x] for x, _ in self.connections], [self.kp_indices[y] for _, y in self.connections]]
+    #     self.in_edge = [
+    #         (self.kp_indices[x], self.kp_indices[y])
+    #         for (x, y) in self.connections
+    #     ]        
+
+    #     self.upper_torso = [
+    #         "nose",
+    #         "right_eye_inner",
+    #         "right_eye",
+    #         "right_eye_outer",
+    #         "right_ear",
+            
+    #         "left_eye_inner",
+    #         "left_eye",
+    #         "left_eye_outer",
+    #         "left_ear",
+
+    #         "left_shoulder",
+    #         "right_shoulder"
+    #     ]
+
+    #     self.lower_torso = [
+    #         "left_hip",
+    #         "right_hip"
+    #     ]
+    #     self.headpoint = "nose"
+    #     self.left_elbow = "left_elbow"
+    #     self.right_elbow = "right_elbow"
+    #     self.left_knee = "left_knee"
+    #     self.right_knee = "right_knee"
+    #     self.right_wrist = "right_wrist"
+    #     self.left_wrist = "left_wrist"
+    #     self.left_ankle = "left_ankle"
+    #     self.right_ankle = "right_ankle"
 
     def create_edge_matrix(self):
         self.split_train_and_test()
