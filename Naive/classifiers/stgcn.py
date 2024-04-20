@@ -25,11 +25,11 @@ SAVE_MODEL = 5
 LOAD_MODEL = False
 MODEL_NAME = "model_checkpoints"
 
-DROPOUT = 0.75
-WEIGHT_DECAY = 1e-2
+DROPOUT = 0.99
+WEIGHT_DECAY = 1e-1
 
 EPOCHS = 100
-LR = 1e-3
+LR = 1e-5
 
 def force_cudnn_initialization():
     if device == "cuda":

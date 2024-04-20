@@ -71,14 +71,17 @@ exclude = [
 ]
 exclude=None
 my_ds = HMDBDataset(generate_test_video=None, 
-                    max_samples=120,
+                    max_samples=None,
                     max_classes=None, 
                     min_samples = 10, 
                     exclude_classes=exclude, 
                     num_timesteps=10)
 
-X_train, X_test, y_train, y_test = train_test_split(my_ds.X, my_ds.y, test_size=0.1, shuffle=True, stratify=my_ds.y)
-X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.3, shuffle=True, stratify=y_train)
+TEST_SIZE = 0.3
+VAL_SIZE = 0.3
+
+X_train, X_test, y_train, y_test = train_test_split(my_ds.X, my_ds.y, test_size=TEST_SIZE, shuffle=True, stratify=my_ds.y)
+X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=VAL_SIZE, shuffle=True, stratify=y_train)
 train = TrainValDataset(my_ds, X_train, y_train)
 test = TrainValDataset(my_ds, X_test, y_test)
 val = TrainValDataset(my_ds, X_val, y_val)

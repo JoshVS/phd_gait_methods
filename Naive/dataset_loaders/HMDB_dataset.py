@@ -60,15 +60,13 @@ def read_from_cached_file(filename, min_samples=2):
     with open(filename, 'r') as in_file:
         lines = in_file.read().split("\n")
     curr_data = []
-    z_data = []
     for line in lines:
         if line == "": continue
-        i, kp, x, y, z = line.split(";")
+        i, kp, x, y = line.split(";")
         curr_data.append([int(i), kp, float(x), float(y)])
-        z_data.append([float(z)])
     if curr_data == [] or (len(curr_data) // 33) * 2 < min_samples:
         return None
-    return curr_data, z_data
+    return curr_data
     
         
 
@@ -724,10 +722,9 @@ class HMDBDataset(GenericGaitDataset):
                     # quit()
                     if ret_val is not None:
                         num_samples += 1
-                        to_append, z_datum = ret_val
-                        to_append = [[ind, a, b, c, d[0]] for ((ind, a, b, c), (d)) in zip(to_append, z_datum)]
+                        to_append= ret_val
+                        to_append = [[ind, a, b, c] for (ind, a, b, c) in to_append]
                         tmp_vids.append(to_append)
-                        tmp_z.append(z_datum)
                         tmp_vid_filenames.append(os.path.join(self.directory,class_name, vid))
                         tmp_classes.append(class_idx)
                 else:
@@ -1008,7 +1005,7 @@ class HMDBDataset(GenericGaitDataset):
         
 
     def adjust_input_data(self, X):
-        X = X[...,:-1] # Remove Z Dimension
+        # X = X[...,:-1] # Remove Z Dimension
         # X = X.reshape(X.shape + (1,))
         # print(X.shape)
         N = 0
