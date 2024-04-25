@@ -22,14 +22,14 @@ from torch.nn.functional import softmax
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 SAVE_MODEL = 5
-LOAD_MODEL = False
+LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
 
-DROPOUT = 0.99
+DROPOUT = 0.9
 WEIGHT_DECAY = 1e-1
 
 EPOCHS = 100
-LR = 1e-5
+LR = 1e-6
 
 def force_cudnn_initialization():
     if device == "cuda":
@@ -174,20 +174,25 @@ class MarcSTGCN(nn.Module):
         self.data_bn = nn.BatchNorm1d(num_person * in_channels * num_point)
 
         weights_init(self.data_bn, bs=1)
+        
 
-        self.layers = nn.ModuleDict(
-            {'layer1': ST_GCN_block(in_channels, 64, A, cuda_, residual=False),
-             'layer2': ST_GCN_block(64, 64, A, cuda_),
-             'layer3': ST_GCN_block(64, 64, A, cuda_),
-             'layer4': ST_GCN_block(64, 64, A, cuda_),
-             'layer5': ST_GCN_block(64, 128, A, cuda_, stride=2),
-             'layer6': ST_GCN_block(128, 128, A, cuda_),
-             'layer7': ST_GCN_block(128, 128, A, cuda_),
-             'layer8': ST_GCN_block(128, 256, A, cuda_, stride=2),
-             'layer9': ST_GCN_block(256, 256, A, cuda_),
-            #  'layer10': ST_GCN_block(256, 256, A, cuda_)
-             }
-        )
+        layers = [ 
+            ST_GCN_block(in_channels, 64, A, cuda_, residual=False),
+            ST_GCN_block(64, 64, A, cuda_),
+            #  'layer3': ST_GCN_block(64, 64, A, cuda_),
+            ST_GCN_block(64, 64, A, cuda_),
+            ST_GCN_block(64, 128, A, cuda_, stride=2),
+            ST_GCN_block(128, 128, A, cuda_),
+            ST_GCN_block(128, 128, A, cuda_),
+            ST_GCN_block(128, 256, A, cuda_, stride=2),
+            ST_GCN_block(256, 256, A, cuda_),
+            ST_GCN_block(256, 256, A, cuda_)
+        ]
+        layer_dict = {}
+        for i, l in enumerate(layers):
+            layer_dict[f'layer{i+1}'] = l
+
+        self.layers = nn.ModuleDict(layer_dict)
 
         self.fc = nn.Linear(256, num_class)
         weights_init(self.fc, bs=num_class)
@@ -224,8 +229,8 @@ class STGCN:
         self.n_classes = ds.n_classes
         self.class_names = ds.classes
         self.n_point = ds.n_point
-        self.num_person = 2
-        self.in_channels = 2
+        self.num_person = 1
+        self.in_channels = 3
         self.loss_fn = loss_fn
 
         self.graph = MediapipeGraph(self.n_point, ds.in_edge)

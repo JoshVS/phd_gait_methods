@@ -25,6 +25,10 @@ WRITE_TO_CACHE = True
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+def list_all_unique_classes(directory):
+    files = os.listdir(directory)
+    classes = [int(sample_name.split('A')[-1].split('.')[0]) for sample_name in files]
+    return np.unique(classes)
 
 def cell_callback_factory(num_frames):
 
@@ -150,6 +154,15 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
         if curr_line == '':
             continue
         if curr_line == '25':
+            if joint_num < 25:
+                for j in range(25):
+                    vid_results[(frame_num) * 25 + j] = [
+                        0,
+                        "null",
+                        0,
+                        0,
+                        0
+                    ]
             joint_num = 0
             frame_num += 1
             continue
@@ -240,7 +253,7 @@ class NTURGBDDataset(GenericGaitDataset):
 
     def initialise_stuff(self):
         torch.set_default_dtype(torch.float32)
-        self.skel_data, self.kp_indices, self.labels = self._get_file_data(self.max_samples, self.max_classes) # (n_people, n_files, n_lines, 3)
+        self.X, self.kp_indices, self.y = self._get_file_data(self.max_samples, self.max_classes) # (n_people, n_files, n_lines, 3)
         # print(self.skel_data)
         # quit()
         
@@ -256,7 +269,6 @@ class NTURGBDDataset(GenericGaitDataset):
 
         
         
-        self.y  = self.labels
 
         # print(self.X[1][0])
         # quit()
@@ -469,6 +481,7 @@ class NTURGBDDataset(GenericGaitDataset):
                 # print(len(curr_sample), i, len(self.X))
                 # print(dim(curr_sample), i, j)
                 # quit()
+                # print(dim(x), dim(curr_sample))
                 f = interp1d(x, curr_sample, axis=0)
                 xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
                 # print(xnew, len(curr_sample))
@@ -639,7 +652,7 @@ class NTURGBDDataset(GenericGaitDataset):
         # Need skeleton to be shape (vid_seq, frame, keypoints, 2)
         reshaped_skel = []
         reshaped_z_data = []
-        loop = tqdm(self.skel_data)
+        loop = tqdm(self.X)
         for i, person in enumerate(loop):
             # reshaped_skel.append([])
             reshaped_skel.append([[]])
@@ -665,82 +678,97 @@ class NTURGBDDataset(GenericGaitDataset):
         # print(sample_names, len(sample_names), max_classes)
         # quit()
         classes = []
-        loop = tqdm(sample_names)
-
-        
-        for sample_idx ,sample_name in enumerate(loop):
-            # print("#################################")
-            # print(f"Sample {sample_idx + 1} / {len(sample_names)}")
-            # print("#################################")
-            
-            
-            # if max_samples is None:
-            #     maximum_num_samples = int(len(vids))
-            # elif 0 < max_samples < 1:
-            #     maximum_num_samples = int(len(vids) * max_samples)
-            #     # vids = vids[:int(len(vids) * max_samples)]
-            # elif max_samples < len(vids):
-            #     maximum_num_samples = max_samples
-            # else:
-            #     maximum_num_samples = int(len(vids))
-                # vids = vids[:int(max_samples)]
-            # classes.append(person_id)
-            curr_class = int(sample_name.split('A')[-1].split('.')[0]) - 1
-            class_vids = []
-            z_class_vids = []
-            class_vid_filenames = []
-
-            if not os.path.exists(f"cached/"):
-                os.makedirs(f"cached/")
-            num_samples = 0
-            tmp_z = []
-            tmp_vids = []
-            tmp_vid_filenames = []
-            tmp_classes = []
-            if os.path.exists(f"cached/{sample_name}.txt") and READ_FROM_CACHE:
-                # to_append, z_datum = read_from_cached_file(f"cached/{vid}.txt")
-                ret_val = read_from_cached_file(f"cached/{sample_name}.txt")
+        # loop = tqdm(sample_names)
+        unique_classes = list_all_unique_classes(self.directory)
+        if max_classes is not None:
+            unique_classes = unique_classes[:max_classes]
+        for uc in unique_classes:
+            print("##############################")
+            print(f"CLASS {uc} / {len(unique_classes)}")            
+            print("##############################")
+            listing = [a.split("/")[-1] for a in glob.glob(os.path.join(self.directory, f"*{uc:03d}.skeleton"))]
+            if max_samples is not None:
+                if 0 < max_samples < 1:
+                    max_samples = int(max_samples * len(listing))
+                listing = listing if max_samples > len(listing) else listing[:max_samples]
                 
-                # if ret_val is None:
-                #     continue
-                # to_append, z_datum = ret_val
-                # to_append = [[a, b, c, d[0]] for ((a, b, c), (d)) in zip(to_append, z_datum)]
-                # to_append = np.concatenate((to_append, z_datum), axis=1)
-                
+
+            loop = tqdm(listing)
+            for sample_idx ,sample_name in enumerate(loop):
+                # print(sample_name)
                 # quit()
-                if ret_val is not None:
-                    num_samples += 1
-                    to_append= ret_val
-                    to_append = [[ind, a, b, c,d] for (ind, a, b, c, d) in to_append]
-                    videos.append(to_append)
-                    vid_filenames.append(os.path.join(self.directory,sample_name))
-                    classes.append(curr_class)
-            else:
-                print(f"[{sample_idx + 1} / {len(sample_names)}]File cached/{sample_name}.txt doesn't exist, creating")
-                filename = os.path.join(self.directory, sample_name)
-                c = get_kp_from_file(filename, kp_dict)
+                # print("#################################")
+                # print(f"Sample {sample_idx + 1} / {len(sample_names)}")
+                # print("#################################")
                 
-                if c is not None:
-                    num_samples += 1
-                    videos.append(c)
-                    vid_filenames.append(filename)
-                    if WRITE_TO_CACHE:
-                        write_to_file(f"cached/{sample_name}.txt", c)
-                    classes.append(curr_class)
+                
+                # if max_samples is None:
+                #     maximum_num_samples = int(len(vids))
+                # elif 0 < max_samples < 1:
+                #     maximum_num_samples = int(len(vids) * max_samples)
+                #     # vids = vids[:int(len(vids) * max_samples)]
+                # elif max_samples < len(vids):
+                #     maximum_num_samples = max_samples
+                # else:
+                #     maximum_num_samples = int(len(vids))
+                    # vids = vids[:int(max_samples)]
+                # classes.append(person_id)
+                curr_class = int(sample_name.split('A')[-1].split('.')[0]) - 1
+                class_vids = []
+                z_class_vids = []
+                class_vid_filenames = []
+
+                if not os.path.exists(f"cached/"):
+                    os.makedirs(f"cached/")
+                num_samples = 0
+                tmp_z = []
+                tmp_vids = []
+                tmp_vid_filenames = []
+                tmp_classes = []
+                if os.path.exists(f"cached/{sample_name}.txt") and READ_FROM_CACHE:
+                    # to_append, z_datum = read_from_cached_file(f"cached/{vid}.txt")
+                    ret_val = read_from_cached_file(f"cached/{sample_name}.txt")
+                    
+                    # if ret_val is None:
+                    #     continue
+                    # to_append, z_datum = ret_val
+                    # to_append = [[a, b, c, d[0]] for ((a, b, c), (d)) in zip(to_append, z_datum)]
+                    # to_append = np.concatenate((to_append, z_datum), axis=1)
+                    
+                    # quit()
+                    if ret_val is not None:
+                        num_samples += 1
+                        to_append= ret_val
+                        to_append = [[ind, a, b, c,d] for (ind, a, b, c, d) in to_append]
+                        videos.append(to_append)
+                        vid_filenames.append(os.path.join(self.directory,sample_name))
+                        classes.append(curr_class)
                 else:
-                    # pass
-                    if WRITE_TO_CACHE:
-                        write_to_file(f"cached/{sample_name}.txt", "")
-                
-            # if num_samples >= self.min_samples:
-            #     videos.extend(tmp_vids)
-            #     classes.extend(tmp_classes)
-            #     vid_filenames.extend(tmp_vid_filenames)
-            #     z_class_vids.extend(tmp_z)
-            # videos.append(class_vids)
-            # z_data.append(z_class_vids)
-            # print([len(v)//33 for v in videos])
-            loop.set_postfix()
+                    print(f"[{sample_idx + 1} / {len(listing)}]File cached/{sample_name}.txt doesn't exist, creating")
+                    filename = os.path.join(self.directory, sample_name)
+                    c = get_kp_from_file(filename, kp_dict)
+                    
+                    if c is not None:
+                        num_samples += 1
+                        videos.append(c)
+                        vid_filenames.append(filename)
+                        if WRITE_TO_CACHE:
+                            write_to_file(f"cached/{sample_name}.txt", c)
+                        classes.append(curr_class)
+                    else:
+                        # pass
+                        if WRITE_TO_CACHE:
+                            write_to_file(f"cached/{sample_name}.txt", "")
+                    
+                # if num_samples >= self.min_samples:
+                #     videos.extend(tmp_vids)
+                #     classes.extend(tmp_classes)
+                #     vid_filenames.extend(tmp_vid_filenames)
+                #     z_class_vids.extend(tmp_z)
+                # videos.append(class_vids)
+                # z_data.append(z_class_vids)
+                # print([len(v)//33 for v in videos])
+                loop.set_postfix()
 
         # print(dim(videos), dim(classes))
         # print([len(v)//33 for v in videos])
