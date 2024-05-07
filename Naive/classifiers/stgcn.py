@@ -21,15 +21,15 @@ from torch.nn.functional import softmax
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-SAVE_MODEL = 5
+SAVE_MODEL = 1
 LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
 
-DROPOUT = 0.9
-WEIGHT_DECAY = 1e-1
+DROPOUT = 0.25
+WEIGHT_DECAY = 1e-5
 
 EPOCHS = 100
-LR = 1e-6
+LR = 1e-5
 
 def force_cudnn_initialization():
     if device == "cuda":
@@ -398,7 +398,7 @@ class STGCN:
             if SAVE_MODEL is not None:
                 if (epoch + 1) % SAVE_MODEL == 0:
                     curr_metrics = np.sum(list(scalar_metrics["val"].values()))
-                    if curr_metrics < prev_metrics:
+                    if False:#curr_metrics < prev_metrics:
                         print("Current Metrics not as good, skipping")
                     else:
                         prev_metrics = curr_metrics

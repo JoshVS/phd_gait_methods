@@ -6,16 +6,12 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from .genericdataset import GenericGaitDataset
-import seaborn as sns
 import matplotlib.pyplot as plt
-import plotly.express as px
-from ultralytics import YOLO
 import torch
 from scipy.interpolate import interp1d
 # matplotlib.use('TkAgg')
 np.seterr(all='raise')
 
-from sklearn.ensemble import RandomForestClassifier
 from celluloid import Camera
 
 torch.set_default_dtype(torch.float32)
@@ -240,7 +236,7 @@ def write_to_file(filename, kps):
 
 class NTURGBDDataset(GenericGaitDataset):
 
-    def __init__(self, directory='../../../Datasets/NTURGBD/nturgbd_skeletons_s001_to_s017/nturgb+d_skeletons/', max_samples=None, min_samples=20, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None):
+    def __init__(self, directory=os.path.join(*'../../../Datasets/NTURGBD/nturgbd_skeletons_s001_to_s017/nturgb+d_skeletons/'.split("/")), max_samples=None, min_samples=20, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None):
         
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.val_split = val_split
@@ -321,7 +317,7 @@ class NTURGBDDataset(GenericGaitDataset):
         for ic, sample_name in enumerate(self.classes):
             found_class = False    
             for iv, v in enumerate(self.video_filenames):
-                curr_vid_class = v.split("/")[6]
+                curr_vid_class = v.split(os.sep)[6]
                 if not found_class:
                     if curr_vid_class == sample_name:
                         found_class = True
@@ -666,7 +662,7 @@ class NTURGBDDataset(GenericGaitDataset):
         return reshaped_skel
 
     def create_file_data(self, kp_dict, max_samples, max_classes):
-        if not os.path.exists("cached/"):
+        if not os.path.exists("cached"):
             os.makedirs("cached")
         videos = []
         z_data = []
@@ -686,7 +682,7 @@ class NTURGBDDataset(GenericGaitDataset):
             print("##############################")
             print(f"CLASS {uc} / {len(unique_classes)}")            
             print("##############################")
-            listing = [a.split("/")[-1] for a in glob.glob(os.path.join(self.directory, f"*{uc:03d}.skeleton"))]
+            listing = [a.split(os.sep)[-1] for a in glob.glob(os.path.join(self.directory, f"*{uc:03d}.skeleton"))]
             if max_samples is not None:
                 if 0 < max_samples < 1:
                     max_samples = int(max_samples * len(listing))
@@ -718,16 +714,16 @@ class NTURGBDDataset(GenericGaitDataset):
                 z_class_vids = []
                 class_vid_filenames = []
 
-                if not os.path.exists(f"cached/"):
-                    os.makedirs(f"cached/")
+                if not os.path.exists(f"cached"):
+                    os.makedirs(f"cached")
                 num_samples = 0
                 tmp_z = []
                 tmp_vids = []
                 tmp_vid_filenames = []
                 tmp_classes = []
-                if os.path.exists(f"cached/{sample_name}.txt") and READ_FROM_CACHE:
+                if os.path.exists(os.path.join("cached", f"{sample_name}.txt")) and READ_FROM_CACHE:
                     # to_append, z_datum = read_from_cached_file(f"cached/{vid}.txt")
-                    ret_val = read_from_cached_file(f"cached/{sample_name}.txt")
+                    ret_val = read_from_cached_file(os.path.join("cached", f"{sample_name}.txt"))
                     
                     # if ret_val is None:
                     #     continue
@@ -746,19 +742,19 @@ class NTURGBDDataset(GenericGaitDataset):
                 else:
                     print(f"[{sample_idx + 1} / {len(listing)}]File cached/{sample_name}.txt doesn't exist, creating")
                     filename = os.path.join(self.directory, sample_name)
-                    c = get_kp_from_file(filename, kp_dict)
+                    c = get_kp_from_file(sample_name, kp_dict)
                     
                     if c is not None:
                         num_samples += 1
                         videos.append(c)
                         vid_filenames.append(filename)
                         if WRITE_TO_CACHE:
-                            write_to_file(f"cached/{sample_name}.txt", c)
+                            write_to_file(os.path.join("cached", f"{sample_name}.txt"), c)
                         classes.append(curr_class)
                     else:
                         # pass
                         if WRITE_TO_CACHE:
-                            write_to_file(f"cached/{sample_name}.txt", "")
+                            write_to_file(os.path.join("cached", f"{sample_name}.txt"), "")
                     
                 # if num_samples >= self.min_samples:
                 #     videos.extend(tmp_vids)
