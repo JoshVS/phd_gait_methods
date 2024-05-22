@@ -313,9 +313,28 @@ class NTURGBDDataset(GenericGaitDataset):
         # self.y = self.to_one_hot()
         # self.X = self.get_position_vectors()
         self.X = self.adjust_input_data(self.X)
-        self.split_train_and_test()
+        # self.split_train_and_test()
+        
+        self.save_to_streaming()
+        quit()
 
+    def save_to_streaming(self, batch_size=32):
+        X_train, X_test, y_train, y_test = train_test_split(self.X, self.y, test_size=0.3, shuffle=True, stratify=self.y)
+        X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.3, shuffle=True, stratify=y_train)
+        def save_set(X, y, set_name):
+            if not os.path.exists(f"streaming{os.sep}{set_name}"):
+                os.makedirs(f"streaming{os.sep}{set_name}")
+            for i in range(X.shape[0] // batch_size - 1):
+                np.save(os.path.join("streaming", set_name, f"X_{i}.pkl"), X[batch_size * i: batch_size * i + batch_size])
+                np.save(os.path.join("streaming", set_name, f"y_{i}.pkl"), y[batch_size * i: batch_size * i + batch_size])
 
+        if not os.path.exists("streaming"):
+            os.makedirs("streaming")
+        save_set(X_train, y_train, "train")
+        save_set(X_test, y_test, "test")
+        save_set(X_val, y_val, "val")
+        
+        
 
     def pad_for_time(self, convert_to_numpy=True):
         min_frames = max([len(x[0]) for x in self.X])
@@ -1065,4 +1084,5 @@ class NTURGBDDataset(GenericGaitDataset):
         # quit()
         X = X.transpose(N, C, T, V, M)
         # print(X.shape)
+        self.np_X = X
         return torch.tensor(X, dtype=torch.double)
