@@ -28,6 +28,8 @@ MODEL_NAME = "model_checkpoints"
 DROPOUT = 0.25
 WEIGHT_DECAY = 1e-5
 
+BATCH_SIZE=32
+
 EPOCHS = 100
 LR = 1e-5
 
@@ -331,7 +333,7 @@ class STGCN:
         return val_metrics
 
 
-    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=LR, momentum=0.9, epochs=EPOCHS, batch_size=32):
+    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=LR, momentum=0.9, epochs=EPOCHS, batch_size=BATCH_SIZE):
         # train_samples = int((1 - test_split) * len(self.ds))
         # test_samples = int(len(self.ds) - train_samples)
         # val_samples = int(val_split * train_samples)

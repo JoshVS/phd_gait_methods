@@ -282,8 +282,12 @@ class NTURGBDDataset(GenericGaitDataset):
         # self.scaling_vector()
         # quit()     
         # self.X, self.y = self.get_individual_steps()
-   
-        self.interpolate_by_time()
+        if type(self.num_timesteps) == int:
+            self.interpolate_by_time()
+        elif self.num_timesteps == "pad":
+            self.pad_for_time()
+        else:
+            print(f"Invalid option '{self.num_timesteps}'. Please specify a number or 'pad'")
         # print(self.y)
         # quit()
         # sns.histplot(np.array(self.y), x=self.classes)
@@ -311,6 +315,25 @@ class NTURGBDDataset(GenericGaitDataset):
         self.X = self.adjust_input_data(self.X)
         self.split_train_and_test()
 
+
+
+    def pad_for_time(self, convert_to_numpy=True):
+        min_frames = max([len(x[0]) for x in self.X])
+        print(f"Num Timesteps: {min_frames}")
+        # quit()
+
+        print(dim(self.X))
+        # print([len(x) for x in self.X])
+        # quit()
+        for i in range(len(self.X)):
+            for j in range(len(self.X[i])):
+                if len(self.X[i][j]) < min_frames:
+                    padding = [[[0]* 3] * len(self.X[i][j][0])] * (min_frames - len(self.X[i][j]))
+                    self.X[i][j] = self.X[i][j] + padding
+
+        if convert_to_numpy:
+            self.X = np.array(self.X, dtype=np.double)
+
     def show_video(self, i, include_centroids=False, max_frames=200, outfile = "plots.gif"):
         # print(self.classes, self.video_filenames)
         # quit()
@@ -324,9 +347,6 @@ class NTURGBDDataset(GenericGaitDataset):
                         self._show_video(iv + i, include_centroids, max_frames, outfile=f"{sample_name}_plot.gif")
 
 
-
-
-        # pass
         
     def _show_video(self, i, include_centroids=False, max_frames=200, outfile = "plots.gif"):
         i = abs(i)
