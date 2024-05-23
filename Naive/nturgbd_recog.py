@@ -32,8 +32,8 @@ class TrainValDataset(Dataset):
 
 
 my_ds = NTURGBDDataset(generate_test_video=None, 
-                    max_samples=15,
-                    max_classes=2, 
+                    max_samples=None,
+                    max_classes=None, 
                     min_samples = 10, 
                     num_timesteps="pad")
 print("SUCCESS")

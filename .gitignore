@@ -29,6 +29,8 @@ Naive/misc/*
 *.info
 *.mov
 
+*.npy
+
 # Distribution / packaging
 .Python
 build/

@@ -324,9 +324,13 @@ class NTURGBDDataset(GenericGaitDataset):
         def save_set(X, y, set_name):
             if not os.path.exists(f"streaming{os.sep}{set_name}"):
                 os.makedirs(f"streaming{os.sep}{set_name}")
-            for i in range(X.shape[0] // batch_size - 1):
+            print(f"Writing {set_name}")
+            loop = tqdm(range(X.shape[0] // batch_size - 1))
+
+            for i in loop:
                 np.save(os.path.join("streaming", set_name, f"X_{i}.pkl"), X[batch_size * i: batch_size * i + batch_size])
                 np.save(os.path.join("streaming", set_name, f"y_{i}.pkl"), y[batch_size * i: batch_size * i + batch_size])
+                loop.set_postfix()
 
         if not os.path.exists("streaming"):
             os.makedirs("streaming")
