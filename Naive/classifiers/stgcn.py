@@ -226,8 +226,10 @@ class STGCN:
         torch.set_default_dtype(torch.double)
         self.model_name = model_name
         self.train_set, self.test_set, self.val_set = ds
-        self.time_steps = self.train_set.X.size()[2]
+        # print(len(self.train_set)//866)
+        # quit()
         ds = self.train_set
+        self.time_steps = ds.num_timesteps
         self.n_classes = ds.n_classes
         self.class_names = ds.classes
         self.n_point = ds.n_point
@@ -342,9 +344,10 @@ class STGCN:
         # self.val_set = self.val_set.to(device)
 
         # quit()
-        self.train_set = DataLoader(self.train_set, batch_size=batch_size)
-        self.val_set = DataLoader(self.val_set, batch_size=batch_size)
-
+        self.train_set = DataLoader(self.train_set, batch_size=batch_size, shuffle=False)
+        self.val_set = DataLoader(self.val_set, batch_size=batch_size, shuffle=False)
+        # print(len(self.train_set))
+        # quit()
 
 
         if optimizer is None:
@@ -362,6 +365,7 @@ class STGCN:
         prev_metrics = 0
 
         print(f"Training with {self.time_steps} time steps and {self.n_classes} classes")
+        print(f"Training on device {device}")
         for epoch in range(epochs):
             print()
             print(f"Epoch #{epoch + 1}: ")
