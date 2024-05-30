@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from torch.nn.functional import softmax
 from ray import train
 from ray import tune
+from ray.tune.tuner import Tuner
 from ray.train import Checkpoint, get_checkpoint
 from ray.tune.schedulers import ASHAScheduler
 import ray.cloudpickle as pickle
@@ -36,7 +37,7 @@ MODEL_NAME = "model_checkpoints"
 DROPOUT = 0.25
 WEIGHT_DECAY = 1e-5
 
-BATCH_SIZE=32
+BATCH_SIZE=8
 
 EPOCHS = 100
 LR = 1e-5
@@ -352,10 +353,11 @@ class STGCN:
 
     def train(self,  lr=LR, momentum=0.9, epochs=EPOCHS, batch_size=BATCH_SIZE):
         
-        self.train_set = DataLoader(self.train_set, batch_size=batch_size, shuffle=False)
-        self.val_set = DataLoader(self.val_set, batch_size=batch_size, shuffle=False)
+        self.total_train_set = DataLoader(self.train_set, batch_size=batch_size, shuffle=False)
+        self.total_val_set = DataLoader(self.val_set, batch_size=batch_size, shuffle=False)
 
-        def tune_hyperparams(config, data_dir=None):
+        def tune_hyperparams(config, data=None):
+            self.train_set, self.val_set = data
             self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=config["l1"], l2=config["l2"], l3=config["l3"], dropout=config["dropout"]).to(device)
             
             optimizer = torch.optim.Adam(self.classifier.parameters(), lr=config['lr'], weight_decay=WEIGHT_DECAY)
@@ -505,12 +507,18 @@ class STGCN:
             reduction_factor=2
         )
 
-        result = tune.run(
-            partial(tune_hyperparams, data_dir="tuning"),
-            resources_per_trial={"cpu": 1, "gpu": 1},
-            config=config,
-            scheduler=scheduler
+        tuner = Tuner(
+            trainable=tune.with_parameters(tune_hyperparams, data=(self.total_train_set, self.total_val_set)),
+            param_space=config
         )
+        result = tuner.fit()
+
+        # result = tune.run(
+        #     partial(tune_hyperparams, data_dir="tuning"),
+        #     resources_per_trial={"cpu": 1, "gpu": 1},
+        #     config=config,
+        #     scheduler=scheduler
+        # )
         best_trial = result.get_best_trial("loss", "min", "last")
         print(f"Best trial config: \t {best_trial.config}")
         print(f"Best Trial Final Validation Metrics: \t {best_trial.last_result}")
