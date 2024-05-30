@@ -7,12 +7,12 @@ import numpy as np
 import torch
 
 class TrainValDataset(Dataset):
-    def __init__(self, cache_dir="streaming", batch_size=32):
+    def __init__(self, cache_dir="streaming", batch_size=1024):
         self.cache_dir = cache_dir
         self.batch_size = batch_size
         self.file_index = 0
-        self.X_cached = torch.tensor(np.load(os.path.join(cache_dir, "X_0.pkl.npy")), dtype=torch.double)
-        self.y_cached = torch.tensor(np.load(os.path.join(cache_dir, "y_0.pkl.npy")), dtype=torch.double)
+        self.X_cached = torch.tensor(np.load(os.path.join(cache_dir, str(batch_size), "X_0.pkl.npy")), dtype=torch.double)
+        self.y_cached = torch.tensor(np.load(os.path.join(cache_dir, str(batch_size), "y_0.pkl.npy")), dtype=torch.double)
         self.num_timesteps = self.X_cached.shape[2]
         self.n_classes = self.y_cached.shape[1]
         self.classes = [f"class_{x}" for x in range(self.n_classes)]
@@ -129,8 +129,8 @@ class TrainValDataset(Dataset):
         if self.file_index != idx // self.batch_size:
             # print("Getting new batch")
             self.file_index = idx // self.batch_size
-            X_filename = os.path.join(self.cache_dir, f"X_{self.file_index}.pkl.npy")
-            y_filename = os.path.join(self.cache_dir, f"y_{self.file_index}.pkl.npy")
+            X_filename = os.path.join(self.cache_dir,str(self.batch_size),  f"X_{self.file_index}.pkl.npy")
+            y_filename = os.path.join(self.cache_dir,str(self.batch_size),  f"y_{self.file_index}.pkl.npy")
             self.X_cached = torch.tensor(np.load(X_filename), dtype=torch.double)
             self.y_cached = torch.tensor(np.load(y_filename), dtype=torch.double)
 

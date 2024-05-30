@@ -167,7 +167,7 @@ class ST_GCN_block(nn.Module):
 
 
 class MarcSTGCN(nn.Module):
-    def __init__(self, num_class, num_point, num_person, in_channels, graph, cuda_=torch.cuda.is_available()):
+    def __init__(self, num_class, num_point, num_person, in_channels, graph, cuda_=torch.cuda.is_available(), l1=1, l2=1, l3=1):
         super(MarcSTGCN, self).__init__()
 
         self.graph = graph
@@ -176,20 +176,27 @@ class MarcSTGCN(nn.Module):
         self.data_bn = nn.BatchNorm1d(num_person * in_channels * num_point)
 
         weights_init(self.data_bn, bs=1)
+        layers = [ST_GCN_block(in_channels, 64, A, cuda_, residual=False)]
+        layers += [ST_GCN_block(64, 64, A, cuda_)] * (l1 - 1)
+        layers += [ST_GCN_block(64, 128, A, cuda_, stride=2)]
+        layers += [ST_GCN_block(128, 128, A, cuda_)] * (l2 - 1)
+        layers += [ST_GCN_block(128, 256, A, cuda_, stride=2)]
+        layers += [ST_GCN_block(256, 256, A, cuda_)] * (l3 - 1)
         
-
-        layers = [ 
-            ST_GCN_block(in_channels, 64, A, cuda_, residual=False),
-            ST_GCN_block(64, 64, A, cuda_),
-            #  'layer3': ST_GCN_block(64, 64, A, cuda_),
-            ST_GCN_block(64, 64, A, cuda_),
-            ST_GCN_block(64, 128, A, cuda_, stride=2),
-            ST_GCN_block(128, 128, A, cuda_),
-            ST_GCN_block(128, 128, A, cuda_),
-            ST_GCN_block(128, 256, A, cuda_, stride=2),
-            ST_GCN_block(256, 256, A, cuda_),
-            ST_GCN_block(256, 256, A, cuda_)
-        ]
+        # print(layers)
+        # quit()
+        # layers = [ 
+        #     ST_GCN_block(in_channels, 64, A, cuda_, residual=False),
+        #     ST_GCN_block(64, 64, A, cuda_),
+        #     #  'layer3': ST_GCN_block(64, 64, A, cuda_),
+        #     ST_GCN_block(64, 64, A, cuda_),
+        #     ST_GCN_block(64, 128, A, cuda_, stride=2),
+        #     ST_GCN_block(128, 128, A, cuda_),
+        #     ST_GCN_block(128, 128, A, cuda_),
+        #     ST_GCN_block(128, 256, A, cuda_, stride=2),
+        #     ST_GCN_block(256, 256, A, cuda_),
+        #     ST_GCN_block(256, 256, A, cuda_)
+        # ]
         layer_dict = {}
         for i, l in enumerate(layers):
             layer_dict[f'layer{i+1}'] = l
