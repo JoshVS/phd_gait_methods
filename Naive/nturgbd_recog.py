@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 class TrainValDataset(Dataset):
-    def __init__(self, cache_dir="streaming", batch_size=1024):
+    def __init__(self, cache_dir="streaming", batch_size=32):
         self.cache_dir = cache_dir
         self.batch_size = batch_size
         self.file_index = 0
@@ -141,7 +141,8 @@ class TrainValDataset(Dataset):
 #                     max_samples=None,
 #                     max_classes=None, 
 #                     min_samples = 10, 
-#                     num_timesteps="pad")
+#                     num_timesteps="pad",
+#                     save_batch_size=32)
 print("SUCCESS")
 
 # quit()

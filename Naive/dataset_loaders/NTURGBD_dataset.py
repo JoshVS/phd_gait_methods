@@ -236,7 +236,7 @@ def write_to_file(filename, kps):
 
 class NTURGBDDataset(GenericGaitDataset):
 
-    def __init__(self, directory=os.path.join(*'../../../Datasets/NTURGBD/nturgbd_skeletons_s001_to_s017/nturgb+d_skeletons/'.split("/")), max_samples=None, min_samples=20, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None):
+    def __init__(self, directory=os.path.join(*'../../../Datasets/NTURGBD/nturgbd_skeletons_s001_to_s017/nturgb+d_skeletons/'.split("/")), max_samples=None, min_samples=20, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None, save_batch_size=512):
         
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.val_split = val_split
@@ -245,6 +245,7 @@ class NTURGBDDataset(GenericGaitDataset):
         self.test_split = test_split
         self.max_classes = max_classes
         self.num_timesteps = num_timesteps
+        self.save_batch_size = save_batch_size
         self.initialise_stuff()
 
     def initialise_stuff(self):
@@ -318,18 +319,19 @@ class NTURGBDDataset(GenericGaitDataset):
         self.save_to_streaming()
         quit()
 
-    def save_to_streaming(self, batch_size=32):
+    def save_to_streaming(self):
+        batch_size = self.save_batch_size
         X_train, X_test, y_train, y_test = train_test_split(self.X, self.y, test_size=0.3, shuffle=True, stratify=self.y)
         X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.3, shuffle=True, stratify=y_train)
         def save_set(X, y, set_name):
-            if not os.path.exists(f"streaming{os.sep}{set_name}"):
-                os.makedirs(f"streaming{os.sep}{set_name}")
+            if not os.path.exists(f"streaming{os.sep}{set_name}{os.sep}{batch_size}"):
+                os.makedirs(f"streaming{os.sep}{set_name}{os.sep}{batch_size}")
             print(f"Writing {set_name}")
             loop = tqdm(range(X.shape[0] // batch_size - 1))
 
             for i in loop:
-                np.save(os.path.join("streaming", set_name, f"X_{i}.pkl"), X[batch_size * i: batch_size * i + batch_size])
-                np.save(os.path.join("streaming", set_name, f"y_{i}.pkl"), y[batch_size * i: batch_size * i + batch_size])
+                np.save(os.path.join("streaming", set_name, str(batch_size), f"X_{i}.pkl"), X[batch_size * i: batch_size * i + batch_size])
+                np.save(os.path.join("streaming", set_name, str(batch_size), f"y_{i}.pkl"), y[batch_size * i: batch_size * i + batch_size])
                 loop.set_postfix()
 
         if not os.path.exists("streaming"):

@@ -1,6 +1,7 @@
 """
 Modified based on: https://github.com/open-mmlab/mmskeleton
 """
+import sys
 import os
 import glob
 from functools import partial
@@ -156,15 +157,15 @@ class ST_GCN_block(nn.Module):
     def __init__(self, in_channels, out_channels, A, cuda_=False, stride=1, residual=True, dropout=DROPOUT):
         super(ST_GCN_block, self).__init__()
 
-        self.gcn = GraphConvolution(in_channels, out_channels, A, cuda_)
-        self.tcn = TemporalConvolution(out_channels, out_channels, stride=stride, dropout=dropout)
+        self.gcn = GraphConvolution(in_channels, out_channels, A, cuda_, dropout=dropout)
+        self.tcn = TemporalConvolution(out_channels, out_channels, stride=stride)
         self.relu = nn.ReLU()
         if not residual:
             self.residual = lambda x: 0
         elif (in_channels == out_channels) and (stride == 1):
             self.residual = lambda x: x
         else:
-            self.residual = TemporalConvolution(in_channels, out_channels, kernel_size=1, stride=stride, dropout=dropout)
+            self.residual = TemporalConvolution(in_channels, out_channels, kernel_size=1, stride=stride)
 
     def forward(self, x):
         """
@@ -311,14 +312,14 @@ class STGCN:
                 metrics["scalar"][k] = self.tracking_metrics[k](y, predictions)
             # print(y.cpu().numpy().argmax(axis=1).shape, predictions.cpu().numpy().argmax(axis=1).shape)
             # quit()
-            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
-            if "conf_mat" not in metrics["image"].keys():
-                # print(cm.shape)
-                metrics["image"]["conf_mat"] = cm
+            # cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
+            # if "conf_mat" not in metrics["image"].keys():
+            #     # print(cm.shape)
+            #     metrics["image"]["conf_mat"] = cm
 
-            else:
-                # print(cm.shape)
-                metrics["image"]["conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
+            # else:
+            #     # print(cm.shape)
+            #     metrics["image"]["conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
                     
         return metrics
 
@@ -336,15 +337,15 @@ class STGCN:
             for k in self.tracking_metrics.keys():
                 val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](y, predictions)
 
-            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
-            if "val_conf_mat" not in val_metrics["image"]:
-                # print(cm.shape)
-                val_metrics["image"]["val_conf_mat"]  = cm
+            # cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
+            # if "val_conf_mat" not in val_metrics["image"]:
+            #     # print(cm.shape)
+            #     val_metrics["image"]["val_conf_mat"]  = cm
 
-            else:
-                # print(cm.shape)
-                # print(val_metrics["image"]["val_conf_mat"].shape, cm.shape)
-                val_metrics["image"]["val_conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
+            # else:
+            #     # print(cm.shape)
+            #     # print(val_metrics["image"]["val_conf_mat"].shape, cm.shape)
+            #     val_metrics["image"]["val_conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
 
         
 
@@ -355,10 +356,23 @@ class STGCN:
         
         self.total_train_set = DataLoader(self.train_set, batch_size=batch_size, shuffle=False)
         self.total_val_set = DataLoader(self.val_set, batch_size=batch_size, shuffle=False)
+        
+        self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=3, l2=3, l3=3, dropout=0.5)        
+        param_size = 0
+        for param in self.classifier.parameters():
+            param_size += param.nelement() * param.element_size()
+        buffer_size = 0
+        for buffer in self.classifier.buffers():
+            buffer_size += buffer.nelement() * buffer.element_size()
+
+        total_size = (param_size + buffer_size) / 1024**2
+        print(f"Model Size: {total_size:.2f} MB")
+        
+        
 
         def tune_hyperparams(config, data=None):
             self.train_set, self.val_set = data
-            self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=config["l1"], l2=config["l2"], l3=config["l3"], dropout=config["dropout"]).to(device)
+            self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=config["l1"], l2=config["l2"], l3=config["l3"], dropout=config["dropout"])
             
             optimizer = torch.optim.Adam(self.classifier.parameters(), lr=config['lr'], weight_decay=WEIGHT_DECAY)
             checkpoint = get_checkpoint()
@@ -389,9 +403,9 @@ class STGCN:
         # quit()
 
 
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
+            # optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
 
-            writer = SummaryWriter()
+            # writer = SummaryWriter()
 
         # for epoch in range(epochs):
         #     train_iter = iter(self.train_set)
@@ -401,12 +415,12 @@ class STGCN:
         #         curr_sample = next(train_iter)
         
 
-            print(f"Training with {self.time_steps} time steps and {self.n_classes} classes")
-            print(f"Training on device {device}")
+            # print(f"Training with {self.time_steps} time steps and {self.n_classes} classes")
+            # print(f"Training on device {device}")
             for epoch in range(epochs):
-                print()
-                print(f"Epoch #{epoch + 1}: ")
-                train_iter = tqdm(iter(self.train_set))
+                # print()
+                # print(f"Epoch #{epoch + 1}: ")
+                train_iter = iter(self.train_set)
                 scalar_metrics = {"train":{},
                                 "val":{}}
                 train_metrics = {"scalar": {}, "image": {}}
@@ -418,67 +432,67 @@ class STGCN:
                         
                         scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(train_iter)
                     
-                    train_iter.set_postfix(train_metrics["scalar"])
-                sns.heatmap(train_metrics["image"]["conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
-                plt.xlabel("Predicted")
-                plt.ylabel("True")
-                writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
-                plt.close()
-                print()
-                print("Validation:")
+                    # train_iter.set_postfix(train_metrics["scalar"])
+                # sns.heatmap(train_metrics["image"]["conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
+                # plt.xlabel("Predicted")
+                # plt.ylabel("True")
+                # writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
+                # plt.close()
+                # print()
+                # print("Validation:")
                 val_metrics = {"scalar": {}, "image": {}}
-                val_iter = tqdm(iter(self.val_set))
-                for idx, val_sample in enumerate(val_iter):
+                # val_iter = tqdm(iter(self.val_set))
+                for idx, val_sample in iter(self.val_set):
                     val_metrics = self._val_step(val_sample, val_metrics)
                     for k in val_metrics["scalar"].keys():
                         if k not in scalar_metrics["val"].keys():
                             scalar_metrics["val"][k] = 0
                         scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(val_iter)
-                    val_iter.set_postfix(val_metrics["scalar"])
+                    # val_iter.set_postfix(val_metrics["scalar"])
 
                 
                 
-                if SAVE_MODEL is not None:
-                    if (epoch + 1) % SAVE_MODEL == 0:
-                        curr_metrics = np.sum(list(scalar_metrics["val"].values()))
-                        if False:#curr_metrics < prev_metrics:
-                            print("Current Metrics not as good, skipping")
-                        else:
-                            prev_metrics = curr_metrics
-                            m_name = f"epoch_{epoch + 1}"
-                            for k in scalar_metrics["val"].keys():
-                                m_name += f"_{k}_{scalar_metrics['val'][k]:.2f}"
-                            if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}")):
-                                os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}"))
-                            if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}")):
-                                os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}"))
-                            filename = os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}", m_name+".pt")
-                            print(f"Saving model to {filename}")
-                            torch.save(self.classifier.state_dict(), filename)
+                # if SAVE_MODEL is not None:
+                #     if (epoch + 1) % SAVE_MODEL == 0:
+                #         curr_metrics = np.sum(list(scalar_metrics["val"].values()))
+                #         if False:#curr_metrics < prev_metrics:
+                #             print("Current Metrics not as good, skipping")
+                #         else:
+                #             prev_metrics = curr_metrics
+                #             m_name = f"epoch_{epoch + 1}"
+                #             for k in scalar_metrics["val"].keys():
+                #                 m_name += f"_{k}_{scalar_metrics['val'][k]:.2f}"
+                #             if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}")):
+                #                 os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}"))
+                #             if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}")):
+                #                 os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}"))
+                #             filename = os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}", m_name+".pt")
+                #             print(f"Saving model to {filename}")
+                #             torch.save(self.classifier.state_dict(), filename)
                     
                 # fig = plt.figure()
                 # image = torch.image.decode_png(fig.getvalue(), channels=4)
 
-                sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
-                plt.xlabel("Predicted")
-                plt.ylabel("True")
+                # sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
+                # plt.xlabel("Predicted")
+                # plt.ylabel("True")
                 # plt.imshow(hm)
                 # quit()
                 # hm = fig
                 # img_flat = np.frombuffer(fig.canvas.draw().tostring_rgb(), dtype='uint8')
                 # image = img_flat.reshape(*reversed(img_flat.get_width_height), 3)
-                writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)
-                plt.close()
-                print("##################")
-                for k in scalar_metrics["train"].keys():
-                    v = scalar_metrics["train"][k]
-                    v_val = scalar_metrics["val"]["val_" + k]
-                    print(f"{k.capitalize()}: {v:.3f}")
-                    print(f"{('val_' + k).capitalize()}: {v_val:.3f}")
-                    print("##################")
-                    writer.add_scalars(k.capitalize(), {"train": v,
-                                                        "validation":v_val
-                    }, epoch)
+                # writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)
+                # plt.close()
+                # print("##################")
+                # for k in scalar_metrics["train"].keys():
+                #     v = scalar_metrics["train"][k]
+                #     v_val = scalar_metrics["val"]["val_" + k]
+                    # print(f"{k.capitalize()}: {v:.3f}")
+                    # print(f"{('val_' + k).capitalize()}: {v_val:.3f}")
+                    # print("##################")
+                    # writer.add_scalars(k.capitalize(), {"train": v,
+                    #                                     "validation":v_val
+                    # }, epoch)
                 checkpoint_data = {
                     "epoch":epoch,
                     "net_state_dict": self.classifier.state_dict(),
@@ -519,9 +533,10 @@ class STGCN:
         #     config=config,
         #     scheduler=scheduler
         # )
-        best_trial = result.get_best_trial("loss", "min", "last")
+        print(dir(result.get_best_result()))
+        best_trial = result.get_best_result()
         print(f"Best trial config: \t {best_trial.config}")
-        print(f"Best Trial Final Validation Metrics: \t {best_trial.last_result}")
+        print(f"Best Trial Final Validation Metrics: \t {best_trial.metrics_dataframe}")
 
         best_trained_model = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=best_trial.config["l1"], l2=best_trial.config["l2"], l3=best_trial.config["l3"], dropout=best_trial.config["dropout"]).to(device)
 
