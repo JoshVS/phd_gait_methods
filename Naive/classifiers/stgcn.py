@@ -29,6 +29,8 @@ import ray.cloudpickle as pickle
 from pathlib import Path
 import tempfile
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 SAVE_MODEL = 1
@@ -40,7 +42,7 @@ WEIGHT_DECAY = 1e-5
 
 BATCH_SIZE=8
 
-EPOCHS = 100
+EPOCHS = 2
 LR = 1e-5
 
 def force_cudnn_initialization():
@@ -388,7 +390,7 @@ class STGCN:
                 start_epoch = 0
             
             if device == "cuda":
-                self.classifier = nn.DataParallel(self.classifier)
+                self.classifier = nn.DataParallel(self.classifier, device_ids=[0], output_device=0)
             self.classifier.to(device)
 
         # train_samples = int((1 - test_split) * len(self.ds))
@@ -417,21 +419,33 @@ class STGCN:
 
             # print(f"Training with {self.time_steps} time steps and {self.n_classes} classes")
             # print(f"Training on device {device}")
-            for epoch in range(epochs):
-                # print()
-                # print(f"Epoch #{epoch + 1}: ")
-                train_iter = iter(self.train_set)
+            for epoch in range(start_epoch, start_epoch + epochs):
+                print()
+                print(f"Epoch #{epoch + 1}: ")
                 scalar_metrics = {"train":{},
                                 "val":{}}
+                
+                val_metrics = {"scalar": {}, "image": {}}
+                val_iter = iter(self.val_set)
+                for idx, val_sample in enumerate(val_iter):
+                    val_metrics = self._val_step(val_sample, val_metrics)
+                    for k in val_metrics["scalar"].keys():
+                        if k not in scalar_metrics["val"].keys():
+                            scalar_metrics["val"][k] = 0
+                        scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(val_iter)
+                train_iter = iter(self.train_set)
+
+                loop = tqdm(enumerate(train_iter))
                 train_metrics = {"scalar": {}, "image": {}}
-                for idx, curr_sample in enumerate(train_iter):
+                for idx, curr_sample in loop:
                     train_metrics = self._train_step(curr_sample, optimizer, train_metrics)
                     for k in train_metrics["scalar"].keys():
                         if k not in scalar_metrics["train"].keys():
                             scalar_metrics["train"][k] = 0
                         
                         scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(train_iter)
-                    
+                    # train.report(scalar_metrics["train"])
+                    loop.set_postfix(train_metrics["scalar"])
                     # train_iter.set_postfix(train_metrics["scalar"])
                 # sns.heatmap(train_metrics["image"]["conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
                 # plt.xlabel("Predicted")
@@ -440,14 +454,6 @@ class STGCN:
                 # plt.close()
                 # print()
                 # print("Validation:")
-                val_metrics = {"scalar": {}, "image": {}}
-                # val_iter = tqdm(iter(self.val_set))
-                for idx, val_sample in iter(self.val_set):
-                    val_metrics = self._val_step(val_sample, val_metrics)
-                    for k in val_metrics["scalar"].keys():
-                        if k not in scalar_metrics["val"].keys():
-                            scalar_metrics["val"][k] = 0
-                        scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(val_iter)
                     # val_iter.set_postfix(val_metrics["scalar"])
 
                 
@@ -513,17 +519,14 @@ class STGCN:
             "dropout": tune.loguniform(1e-1, 0.9)
         }
 
-        scheduler = ASHAScheduler(
-            metric="loss",
-            mode="min",
-            max_t = 100,
-            grace_period=20,
-            reduction_factor=2
-        )
 
         tuner = Tuner(
-            trainable=tune.with_parameters(tune_hyperparams, data=(self.total_train_set, self.total_val_set)),
-            param_space=config
+            trainable=tune.with_parameters(tune.with_resources(tune_hyperparams, {"gpu": 1}), data=(self.total_train_set, self.total_val_set)),
+            param_space=config,
+            tune_config=tune.TuneConfig(
+                num_samples=30,
+                scheduler=tune.schedulers.ASHAScheduler(metric="val_loss", mode="min", time_attr='epoch', max_t=30)
+            )
         )
         result = tuner.fit()
 
@@ -540,7 +543,7 @@ class STGCN:
 
         best_trained_model = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=best_trial.config["l1"], l2=best_trial.config["l2"], l3=best_trial.config["l3"], dropout=best_trial.config["dropout"]).to(device)
 
-        best_checkpoint = result.get_best_checkpoint(trial=best_trial, metric="val_accuracy", mode="max")
+        best_checkpoint = best_trial.get_best_checkpoint(trial=best_trial, metric="val_accuracy", mode="max")
 
         with best_checkpoint.as_directory() as checkpoint_dir:
             data_path = Path(checkpoint_dir) / "data.pkl"

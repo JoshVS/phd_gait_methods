@@ -123,7 +123,7 @@ class TrainValDataset(Dataset):
 
     
     def __len__(self):
-        return len(os.listdir(self.cache_dir)) * self.batch_size // 2
+        return len(os.listdir(os.path.join(self.cache_dir, str(self.batch_size)))) * self.batch_size // 2
     
     def __getitem__(self, idx):
         if self.file_index != idx // self.batch_size:
@@ -153,9 +153,9 @@ VAL_SIZE = 0.3
 
 # X_train, X_test, y_train, y_test = train_test_split(my_ds.X, my_ds.y, test_size=TEST_SIZE, shuffle=True, stratify=my_ds.y)
 # X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=VAL_SIZE, shuffle=True, stratify=y_train)
-train = TrainValDataset(cache_dir=os.path.join("streaming", "train"))
-test = TrainValDataset(cache_dir=os.path.join("streaming", "test"))
-val = TrainValDataset(cache_dir=os.path.join("streaming", "val"))
+train = TrainValDataset(cache_dir=os.path.join(os.getcwd(), "streaming", "train"))
+test = TrainValDataset(cache_dir=os.path.join(os.getcwd(), "streaming", "test"))
+val = TrainValDataset(cache_dir=os.path.join(os.getcwd(), "streaming", "val"))
 
 ds = (train, test, val)
 
