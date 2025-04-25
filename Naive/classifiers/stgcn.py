@@ -36,7 +36,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 SAVE_MODEL = 1
 LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
-
+TUNE = False
 DROPOUT = 0.25
 WEIGHT_DECAY = 1e-5
 
@@ -253,7 +253,7 @@ class STGCN:
         self.class_names = ds.classes
         self.n_point = ds.n_point
         self.num_person = 1
-        self.in_channels = 3
+        self.in_channels = ds.in_channels
         self.loss_fn = loss_fn
 
         self.graph = MediapipeGraph(self.n_point, ds.in_edge)
@@ -511,46 +511,57 @@ class STGCN:
                         pickle.dump(checkpoint_data, fp)
                     checkpoint = Checkpoint.from_directory(checkpoint_dir)
                     train.report(scalar_metrics["val"], checkpoint=checkpoint)
-        config = {
-            "l1": tune.choice([i for i in range(3)]),
-            "l2": tune.choice([i for i in range(3)]),
-            "l3": tune.choice([i for i in range(3)]),
-            "lr": tune.loguniform(1e-5, 1e-1),
-            "dropout": tune.loguniform(1e-1, 0.9)
-        }
+
+        if TUNE:
+            config = {
+                "l1": tune.choice([i for i in range(3)]),
+                "l2": tune.choice([i for i in range(3)]),
+                "l3": tune.choice([i for i in range(3)]),
+                "lr": tune.loguniform(1e-5, 1e-1),
+                "dropout": tune.loguniform(1e-1, 0.9)
+            }
 
 
-        tuner = Tuner(
-            trainable=tune.with_parameters(tune.with_resources(tune_hyperparams, {"gpu": 1}), data=(self.total_train_set, self.total_val_set)),
-            param_space=config,
-            tune_config=tune.TuneConfig(
-                num_samples=30,
-                scheduler=tune.schedulers.ASHAScheduler(metric="val_loss", mode="min", time_attr='epoch', max_t=30)
+            tuner = Tuner(
+                trainable=tune.with_parameters(tune.with_resources(tune_hyperparams, {"gpu": 1}), data=(self.total_train_set, self.total_val_set)),
+                param_space=config,
+                tune_config=tune.TuneConfig(
+                    num_samples=30,
+                    scheduler=tune.schedulers.ASHAScheduler(metric="val_loss", mode="min", time_attr='epoch', max_t=30)
+                )
             )
-        )
-        result = tuner.fit()
+            result = tuner.fit()
 
-        # result = tune.run(
-        #     partial(tune_hyperparams, data_dir="tuning"),
-        #     resources_per_trial={"cpu": 1, "gpu": 1},
-        #     config=config,
-        #     scheduler=scheduler
-        # )
-        print(dir(result.get_best_result()))
-        best_trial = result.get_best_result()
-        print(f"Best trial config: \t {best_trial.config}")
-        print(f"Best Trial Final Validation Metrics: \t {best_trial.metrics_dataframe}")
+            # result = tune.run(
+            #     partial(tune_hyperparams, data_dir="tuning"),
+            #     resources_per_trial={"cpu": 1, "gpu": 1},
+            #     config=config,
+            #     scheduler=scheduler
+            # )
+            print(dir(result.get_best_result()))
+            best_trial = result.get_best_result()
+            print(f"Best trial config: \t {best_trial.config}")
+            print(f"Best Trial Final Validation Metrics: \t {best_trial.metrics_dataframe}")
 
-        best_trained_model = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=best_trial.config["l1"], l2=best_trial.config["l2"], l3=best_trial.config["l3"], dropout=best_trial.config["dropout"]).to(device)
+            best_trained_model = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=best_trial.config["l1"], l2=best_trial.config["l2"], l3=best_trial.config["l3"], dropout=best_trial.config["dropout"]).to(device)
 
-        best_checkpoint = best_trial.get_best_checkpoint(trial=best_trial, metric="val_accuracy", mode="max")
+            best_checkpoint = best_trial.get_best_checkpoint(trial=best_trial, metric="val_accuracy", mode="max")
 
-        with best_checkpoint.as_directory() as checkpoint_dir:
-            data_path = Path(checkpoint_dir) / "data.pkl"
-            with open(data_path, "rb") as fp:
-                best_checkpoint_data = pickle.load(fp)
+            with best_checkpoint.as_directory() as checkpoint_dir:
+                data_path = Path(checkpoint_dir) / "data.pkl"
+                with open(data_path, "rb") as fp:
+                    best_checkpoint_data = pickle.load(fp)
 
-            best_trained_model.load_state_dict(best_checkpoint_data["net_state_dict"])
+                best_trained_model.load_state_dict(best_checkpoint_data["net_state_dict"])
+        else:
+            config = {
+                "l1": 1,
+                "l2": 2,
+                "l3": 3,
+                "lr": 1e-2,
+                "dropout": 0.5
+            }
+            tune_hyperparams(config, data=(self.total_train_set, self.total_val_set))
 
 
 
