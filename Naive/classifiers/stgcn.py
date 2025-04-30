@@ -234,7 +234,7 @@ class STGCN:
         self.class_names = ds.classes
         self.n_point = ds.n_point
         self.num_person = 1
-        self.in_channels = 3
+        self.in_channels = ds.in_channels
         self.loss_fn = loss_fn
 
         self.graph = MediapipeGraph(self.n_point, ds.in_edge)

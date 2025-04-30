@@ -114,7 +114,7 @@ class CASIADataset(GenericGaitDataset):
 
     def initialise_stuff(self):
         self.skel_data, self.kp_indices, self.labels = self._get_file_data(self.max_samples, self.max_classes) # (n_people, n_files, n_lines, 3)
-        
+        self.classes = self.labels
         
         
         

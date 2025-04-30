@@ -24,6 +24,9 @@ class TrainValDataset(Dataset):
         self.n_classes = ds.n_classes
         self.in_edge = ds.in_edge
         self.n_point = ds.X.shape[3]
+        self.num_timesteps = ds.X.shape[2]
+        self.in_channels = ds.X.shape[1]
+        self.classes = ds.classes
         self.X = X
         self.y = y
         # print(X.size()[2])
