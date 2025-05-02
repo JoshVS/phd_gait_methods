@@ -149,7 +149,7 @@ class InceptionModule(nn.Module):
         return torch.cat([b0,b1,b2,b3], dim=1)
 
 
-class InceptionI3d(nn.Module):
+class InceptionI3dGraph(nn.Module):
     """Inception-v1 I3D architecture.
     The model is introduced in:
         Quo Vadis, Action Recognition? A New Model and the Kinetics Dataset
