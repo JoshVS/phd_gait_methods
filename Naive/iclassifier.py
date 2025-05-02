@@ -1,5 +1,5 @@
 from dataset_loaders.casia_dataset import CASIADataset
-from classifiers.inceptionthreed import InceptionI3dGraph
+from classifiers.inceptionthreed import InceptionClassifier
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 class CASIATorchDataset(Dataset):
@@ -42,7 +42,7 @@ class TrainValDataset(Dataset):
         
 
 # my_ds = CASIADataset(generate_test_video=None, max_samples=None, max_classes=2)
-my_ds = CASIADataset(generate_test_video=None, max_samples=341, max_classes=4)
+my_ds = CASIADataset(generate_test_video=None, max_samples=20, max_classes=4)
 # my_ds = CASIADataset(generate_test_video=None, max_samples=10)
 X_train, X_test, y_train, y_test = train_test_split(my_ds.X, my_ds.y, test_size=0.1, shuffle=True, stratify=my_ds.y)
 X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.3, shuffle=True, stratify=y_train)
@@ -55,4 +55,4 @@ ds = (train, test, val)
 
 # ds = CASIATorchDataset(CASIADataset(generate_test_video=None, max_samples=10))
 # print(dsiter.next())
-classifier = STGCN(ds)
+classifier = InceptionClassifier(ds)
