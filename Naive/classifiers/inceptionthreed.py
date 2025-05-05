@@ -371,10 +371,11 @@ class InceptionI3dGraph(nn.Module):
     def forward(self, x):
         for end_point in self.VALID_ENDPOINTS:
             if end_point in self.end_points:
+                print(x.size())
 
                 x = self._modules[end_point](x) # use _modules to work with dataparallel
                 # quit()
-
+        
         x = self.logits(self.dropout(self.avg_pool(x)))
         if self._spatial_squeeze:
             logits = x.squeeze(3).squeeze(3)
@@ -511,7 +512,9 @@ class InceptionClassifier:
         
         self.total_train_set = DataLoader(self.train_set, batch_size=batch_size, shuffle=False)
         self.total_val_set = DataLoader(self.val_set, batch_size=batch_size, shuffle=False)
-        
+
+        # print(self.train_set.ds.X.size())
+        # quit()
         self.classifier = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=3, l2=3, l3=3, dropout=0.5)        
         param_size = 0
         for param in self.classifier.parameters():
