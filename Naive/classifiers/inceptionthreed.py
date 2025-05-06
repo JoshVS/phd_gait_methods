@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-
+import math
 import numpy as np
 
 import os
@@ -234,7 +234,7 @@ class InceptionI3dGraph(nn.Module):
 
     def __init__(self, num_class, num_point, num_person, in_channels, graph, spatial_squeeze=True,
                  final_endpoint='Logits', name='inception_i3d',  dropout_keep_prob=0.5, l1=1, l2=1, l3=1,
-                 dropout=0.5):
+                 dropout=0.5, thw=(2,2,7)):
         
         # num_class, num_point, num_person, in_channels, graph
         """Initializes I3D model instance.
@@ -258,6 +258,7 @@ class InceptionI3dGraph(nn.Module):
             raise ValueError('Unknown final endpoint %s' % final_endpoint)
 
         super(InceptionI3dGraph, self).__init__()
+        t, h, w = thw
         self._num_classes = num_class
         self._spatial_squeeze = spatial_squeeze
         self._final_endpoint = final_endpoint
@@ -339,7 +340,7 @@ class InceptionI3dGraph(nn.Module):
         if self._final_endpoint == end_point: return
 
         end_point = 'Logits'
-        self.avg_pool = nn.AvgPool3d(kernel_size=[7, 2, 1],
+        self.avg_pool = nn.AvgPool3d(kernel_size=[t, h, w],
                                      stride=(1, 1, 1))
         self.dropout = nn.Dropout(dropout_keep_prob)
         self.logits = Unit3D(in_channels=384+384+128+128, output_channels=self._num_classes,
@@ -369,13 +370,14 @@ class InceptionI3dGraph(nn.Module):
             self.add_module(k, self.end_points[k])
         
     def forward(self, x):
+        # print(x.size())
         for end_point in self.VALID_ENDPOINTS:
             if end_point in self.end_points:
-                print(x.size())
 
                 x = self._modules[end_point](x) # use _modules to work with dataparallel
                 # quit()
-        
+                # print(x.size())
+        # quit()
         x = self.logits(self.dropout(self.avg_pool(x)))
         if self._spatial_squeeze:
             logits = x.squeeze(3).squeeze(3)
@@ -513,9 +515,13 @@ class InceptionClassifier:
         self.total_train_set = DataLoader(self.train_set, batch_size=batch_size, shuffle=False)
         self.total_val_set = DataLoader(self.val_set, batch_size=batch_size, shuffle=False)
 
-        # print(self.train_set.ds.X.size())
+        t = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[2] / 2) / 2) / 2)
+        h = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[3] / 2) / 2) / 2) // 2
+        w = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[4] / 2) / 2) / 2)
+        # print((t,h,w))
         # quit()
-        self.classifier = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=3, l2=3, l3=3, dropout=0.5)        
+
+        self.classifier = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=3, l2=3, l3=3, dropout=0.5, thw=(t, h, w)).to(device)        
         param_size = 0
         for param in self.classifier.parameters():
             param_size += param.nelement() * param.element_size()
@@ -531,7 +537,7 @@ class InceptionClassifier:
         def tune_hyperparams(config, data=None):
             self.train_set, self.val_set = data
             # num_class, num_point, num_person, in_channels, graph
-            self.classifier = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=config["l1"], l2=config["l2"], l3=config["l3"], dropout=config["dropout"])
+            # self.classifier = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=config["l1"], l2=config["l2"], l3=config["l3"], dropout=config["dropout"])
             
             optimizer = torch.optim.Adam(self.classifier.parameters(), lr=config['lr'], weight_decay=WEIGHT_DECAY)
             checkpoint = get_checkpoint()
