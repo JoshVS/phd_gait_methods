@@ -56,6 +56,22 @@ EPOCHS = 2
 LR = 1e-5
 
 
+def manual_batch(arr, batch_size=BATCH_SIZE):
+    # print(arr.size())
+    # quit()
+    if type(arr) == list:
+        return arr
+    out_arr = [None] * (arr.size()[0] // batch_size)
+    for i in range(arr.size()[0] // batch_size):
+        out_arr[i] = arr[i * batch_size:(i + 1) * batch_size]
+    if arr.size()[0] % batch_size != 0:
+        out_arr.append(arr[(arr.size()[0] // batch_size) * batch_size:])
+
+
+
+    return out_arr
+
+
 class MaxPool3dSamePadding(nn.MaxPool3d):
     
     def compute_pad(self, dim, s):
@@ -134,6 +150,8 @@ class Unit3D(nn.Module):
             
     def forward(self, x):
         # compute 'same' padding
+        # print(x.size())
+        # quit()
         (batch, channel, t, h, w) = x.size()
         #print t,h,w
         out_t = np.ceil(float(t) / float(self._stride[0]))
@@ -370,7 +388,6 @@ class InceptionI3dGraph(nn.Module):
             self.add_module(k, self.end_points[k])
         
     def forward(self, x):
-        # print(x.size())
         for end_point in self.VALID_ENDPOINTS:
             if end_point in self.end_points:
 
@@ -400,6 +417,12 @@ class InceptionClassifier:
         torch.set_default_dtype(torch.double)
         self.model_name = model_name
         self.train_set, self.test_set, self.val_set = ds
+        self.val_set.ds.X = manual_batch(self.val_set.ds.X, batch_size=BATCH_SIZE)
+        self.val_set.ds.y = manual_batch(self.val_set.ds.y, batch_size=BATCH_SIZE)
+        self.test_set.ds.X = manual_batch(self.test_set.ds.X, batch_size=BATCH_SIZE)
+        self.test_set.ds.y = manual_batch(self.test_set.ds.y, batch_size=BATCH_SIZE)
+        self.train_set.ds.X = manual_batch(self.train_set.ds.X, batch_size=BATCH_SIZE)
+        self.train_set.ds.y = manual_batch(self.train_set.ds.y, batch_size=BATCH_SIZE)
         # print(len(self.train_set)//866)
         # quit()
         ds = self.train_set
@@ -483,10 +506,14 @@ class InceptionClassifier:
     def _val_step(self, sample, val_metrics):
         val_metrics["scalar"] = {}
         X, y = sample
+        print(X.size())
+        quit()
         X = X.to(device)
         y = y.to(device)
         
         with torch.no_grad():
+            # print(X.size())
+            # quit()
             val_out = self.classifier(X)
             predictions = torch.nn.functional.one_hot(val_out.argmax(axis=1), num_classes=self.n_classes)
             # print(val_out.size(), y.size())
@@ -720,6 +747,8 @@ class InceptionClassifier:
           
             optimizer = torch.optim.Adam(self.classifier.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
             for epoch in range(0, epochs):
+                # print(self.val_set.ds.X.size())
+                # quit()
 
                 print()
                 print(f"Epoch #{epoch + 1}: ")
@@ -727,14 +756,26 @@ class InceptionClassifier:
                                 "val":{}}
                 
                 val_metrics = {"scalar": {}, "image": {}}
-                val_iter = iter(self.val_set)
+                print(self.val_set.ds.X[0][0].size())
+                quit()
+                # val_X = manual_batch(self.val_set.ds.X, batch_size=BATCH_SIZE)
+                # val_y = manual_batch(self.val_set.ds.y, batch_size=BATCH_SIZE)
+            
+                val_iter = iter(val_X)
+                print(val_X[0].size())
+                quit()
                 for idx, val_sample in enumerate(val_iter):
+                    print("VAL SAMPLE")
+                    print(val_sample.size())
+                    quit()
                     val_metrics = self._val_step(val_sample, val_metrics)
                     for k in val_metrics["scalar"].keys():
                         if k not in scalar_metrics["val"].keys():
                             scalar_metrics["val"][k] = 0
                         scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(val_iter)
                 train_iter = iter(self.train_set)
+                print("GOT HERE")
+                quit()
 
                 loop = tqdm(enumerate(train_iter))
                 train_metrics = {"scalar": {}, "image": {}}
