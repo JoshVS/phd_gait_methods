@@ -717,11 +717,33 @@ class InceptionClassifier:
 
                 best_trained_model.load_state_dict(best_checkpoint_data["net_state_dict"])
         else:
-            config = {
-                "l1": 1,
-                "l2": 2,
-                "l3": 3,
-                "lr": 1e-2,
-                "dropout": 0.5
-            }
-            tune_hyperparams(config, data=(self.total_train_set, self.total_val_set))
+          
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+            for epoch in range(0, epochs):
+
+                print()
+                print(f"Epoch #{epoch + 1}: ")
+                scalar_metrics = {"train":{},
+                                "val":{}}
+                
+                val_metrics = {"scalar": {}, "image": {}}
+                val_iter = iter(self.val_set)
+                for idx, val_sample in enumerate(val_iter):
+                    val_metrics = self._val_step(val_sample, val_metrics)
+                    for k in val_metrics["scalar"].keys():
+                        if k not in scalar_metrics["val"].keys():
+                            scalar_metrics["val"][k] = 0
+                        scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(val_iter)
+                train_iter = iter(self.train_set)
+
+                loop = tqdm(enumerate(train_iter))
+                train_metrics = {"scalar": {}, "image": {}}
+                for idx, curr_sample in loop:
+                    train_metrics = self._train_step(curr_sample, optimizer, train_metrics)
+                    for k in train_metrics["scalar"].keys():
+                        if k not in scalar_metrics["train"].keys():
+                            scalar_metrics["train"][k] = 0
+                        
+                        scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(train_iter)
+                    # train.report(scalar_metrics["train"])
+                    loop.set_postfix(train_metrics["scalar"])
