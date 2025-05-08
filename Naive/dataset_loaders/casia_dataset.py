@@ -161,7 +161,7 @@ class CASIADataset(GenericGaitDataset):
         # self.y = self.to_one_hot()
         # self.X = self.get_position_vectors()
         self.X = self.adjust_input_data(self.X)
-        self.y = torch.tensor(self.y, dtype=torch.int32)
+        self.y = torch.tensor(self.y, dtype=torch.float)
         self.split_train_and_test()
         self.gso = self.normalize_gso(self.create_graph_shift_operator())
 

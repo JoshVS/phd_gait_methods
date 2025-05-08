@@ -47,29 +47,14 @@ SAVE_MODEL = 1
 LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
 TUNE = False
-DROPOUT = 0.25
-WEIGHT_DECAY = 1e-5
+DROPOUT = 0.75
+WEIGHT_DECAY = 1e-4
 
 BATCH_SIZE=8
 
-EPOCHS = 2
-LR = 1e-5
+EPOCHS = 100
+LR = 1e-4
 
-
-def manual_batch(arr, batch_size=BATCH_SIZE):
-    # print(arr.size())
-    # quit()
-    if type(arr) == list:
-        return arr
-    out_arr = [None] * (arr.size()[0] // batch_size)
-    for i in range(arr.size()[0] // batch_size):
-        out_arr[i] = arr[i * batch_size:(i + 1) * batch_size]
-    if arr.size()[0] % batch_size != 0:
-        out_arr.append(arr[(arr.size()[0] // batch_size) * batch_size:])
-
-
-
-    return out_arr
 
 
 class MaxPool3dSamePadding(nn.MaxPool3d):
@@ -417,12 +402,6 @@ class InceptionClassifier:
         torch.set_default_dtype(torch.double)
         self.model_name = model_name
         self.train_set, self.test_set, self.val_set = ds
-        self.val_set.ds.X = manual_batch(self.val_set.ds.X, batch_size=BATCH_SIZE)
-        self.val_set.ds.y = manual_batch(self.val_set.ds.y, batch_size=BATCH_SIZE)
-        self.test_set.ds.X = manual_batch(self.test_set.ds.X, batch_size=BATCH_SIZE)
-        self.test_set.ds.y = manual_batch(self.test_set.ds.y, batch_size=BATCH_SIZE)
-        self.train_set.ds.X = manual_batch(self.train_set.ds.X, batch_size=BATCH_SIZE)
-        self.train_set.ds.y = manual_batch(self.train_set.ds.y, batch_size=BATCH_SIZE)
         # print(len(self.train_set)//866)
         # quit()
         ds = self.train_set
@@ -460,8 +439,8 @@ class InceptionClassifier:
             # "precision": Precision("multiclass", average="macro", num_classes=self.n_classes).to(device),
             # "recall": Recall("multiclass", average="macro", num_classes=self.n_classes).to(device)
             "accuracy": lambda x, y: accuracy_score(x.cpu().numpy(), y.cpu().numpy()),
-            "precision": lambda x, y: precision_score(x.cpu().numpy(), y.cpu().numpy(), average="macro", zero_division=0.0),
-            "recall": lambda x, y: recall_score(x.cpu().numpy(), y.cpu().numpy(), average="macro", zero_division=0.0)
+            "precision": lambda x, y: precision_score(x.cpu().numpy(), y.cpu().numpy(), average="macro", zero_division=1.0),
+            "recall": lambda x, y: recall_score(x.cpu().numpy(), y.cpu().numpy(), average="macro", zero_division=1.0)
         }
         self.train()
         # print(train_data.dtype)
@@ -506,8 +485,8 @@ class InceptionClassifier:
     def _val_step(self, sample, val_metrics):
         val_metrics["scalar"] = {}
         X, y = sample
-        print(X.size())
-        quit()
+        # print(X.size())
+        # quit()
         X = X.to(device)
         y = y.to(device)
         
@@ -521,7 +500,7 @@ class InceptionClassifier:
             val_metrics["scalar"]["val_loss"] = val_loss.item()
             for k in self.tracking_metrics.keys():
                 val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](y, predictions)
-
+              
             # cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
             # if "val_conf_mat" not in val_metrics["image"]:
             #     # print(cm.shape)
@@ -622,7 +601,7 @@ class InceptionClassifier:
                     for k in val_metrics["scalar"].keys():
                         if k not in scalar_metrics["val"].keys():
                             scalar_metrics["val"][k] = 0
-                        scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(val_iter)
+                        scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(self.val_set)
                 train_iter = iter(self.train_set)
 
                 loop = tqdm(enumerate(train_iter))
@@ -633,7 +612,7 @@ class InceptionClassifier:
                         if k not in scalar_metrics["train"].keys():
                             scalar_metrics["train"][k] = 0
                         
-                        scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(train_iter)
+                        scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(self.train_set)
                     # train.report(scalar_metrics["train"])
                     loop.set_postfix(train_metrics["scalar"])
                     # train_iter.set_postfix(train_metrics["scalar"])
@@ -756,26 +735,25 @@ class InceptionClassifier:
                                 "val":{}}
                 
                 val_metrics = {"scalar": {}, "image": {}}
-                print(self.val_set.ds.X[0][0].size())
-                quit()
-                # val_X = manual_batch(self.val_set.ds.X, batch_size=BATCH_SIZE)
-                # val_y = manual_batch(self.val_set.ds.y, batch_size=BATCH_SIZE)
-            
-                val_iter = iter(val_X)
-                print(val_X[0].size())
-                quit()
+                # print(self.val_set.X[0].size())
+                # quit()
+                val_iter = iter(self.val_set)
                 for idx, val_sample in enumerate(val_iter):
-                    print("VAL SAMPLE")
-                    print(val_sample.size())
-                    quit()
+                    # print(val_sample[0].size())
+                    # quit()
                     val_metrics = self._val_step(val_sample, val_metrics)
                     for k in val_metrics["scalar"].keys():
                         if k not in scalar_metrics["val"].keys():
                             scalar_metrics["val"][k] = 0
-                        scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(val_iter)
+                        scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(self.val_set.X)
                 train_iter = iter(self.train_set)
-                print("GOT HERE")
-                quit()
+                print("##################")
+                for k in scalar_metrics["val"].keys():
+                
+                    print(f"{k.capitalize()}: {scalar_metrics['val'][k]:.3f}")
+                print("##################")
+                # print("GOT HERE")
+                # quit()
 
                 loop = tqdm(enumerate(train_iter))
                 train_metrics = {"scalar": {}, "image": {}}
@@ -785,6 +763,6 @@ class InceptionClassifier:
                         if k not in scalar_metrics["train"].keys():
                             scalar_metrics["train"][k] = 0
                         
-                        scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(train_iter)
+                        scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(self.train_set.X)
                     # train.report(scalar_metrics["train"])
                     loop.set_postfix(train_metrics["scalar"])
