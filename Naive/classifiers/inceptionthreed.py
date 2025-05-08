@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import math
 import numpy as np
-
+import asyncio
 import os
 import sys
 from collections import OrderedDict
@@ -40,6 +40,9 @@ from pathlib import Path
 import tempfile
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.system("rm -rf runs/*")
+async def start_tensorboard(direc):
+    await asyncio.create_subprocess_shell("tensorboard --logdir=runs/" + direc)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -47,13 +50,13 @@ SAVE_MODEL = 1
 LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
 TUNE = False
-DROPOUT = 0.75
+DROPOUT = 0.5
 WEIGHT_DECAY = 1e-4
 
-BATCH_SIZE=8
+BATCH_SIZE=32
 
 EPOCHS = 100
-LR = 1e-4
+LR = 1e-2
 
 
 
@@ -576,7 +579,7 @@ class InceptionClassifier:
 
             # optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
 
-            # writer = SummaryWriter()
+            
 
         # for epoch in range(epochs):
         #     train_iter = iter(self.train_set)
@@ -697,6 +700,10 @@ class InceptionClassifier:
                 tune_config=tune.TuneConfig(
                     num_samples=30,
                     scheduler=tune.schedulers.ASHAScheduler(metric="val_loss", mode="min", time_attr='epoch', max_t=30)
+                ),
+                run_config=tune.RunConfig(
+                    name="tune_hyperparams",
+                    # storage_path="C:\\\\Users\\joshua.vanstaden\\Documents\\Models\\phd_gait_methods\\Naive",
                 )
             )
             result = tuner.fit()
@@ -723,6 +730,8 @@ class InceptionClassifier:
 
                 best_trained_model.load_state_dict(best_checkpoint_data["net_state_dict"])
         else:
+            writer = SummaryWriter()
+            asyncio.run(start_tensorboard(os.listdir("runs")[-1]))
           
             optimizer = torch.optim.Adam(self.classifier.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
             for epoch in range(0, epochs):
@@ -752,6 +761,7 @@ class InceptionClassifier:
                 
                     print(f"{k.capitalize()}: {scalar_metrics['val'][k]:.3f}")
                 print("##################")
+                writer.add_scalars("Validation", scalar_metrics["val"], epoch)
                 # print("GOT HERE")
                 # quit()
 
@@ -766,3 +776,4 @@ class InceptionClassifier:
                         scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(self.train_set.X)
                     # train.report(scalar_metrics["train"])
                     loop.set_postfix(train_metrics["scalar"])
+                writer.add_scalars("Training", scalar_metrics["train"], epoch)
