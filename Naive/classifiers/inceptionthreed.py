@@ -32,8 +32,9 @@ import matplotlib.pyplot as plt
 from torch.nn.functional import softmax
 from ray import train
 from ray import tune
+import ray
 from ray.tune.tuner import Tuner
-from ray.train import Checkpoint, get_checkpoint
+from ray.tune import Checkpoint, get_checkpoint
 from ray.tune.schedulers import ASHAScheduler
 import ray.cloudpickle as pickle
 from pathlib import Path
@@ -41,22 +42,23 @@ import tempfile
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.system("rm -rf runs/*")
+os.system("kill $(ps -e | grep 'tensorboard' | awk '{print $1}')")
 async def start_tensorboard(direc):
-    await asyncio.create_subprocess_shell("tensorboard --logdir=runs/" + direc)
+    await asyncio.create_subprocess_shell("tensorboard --port 6006 --logdir=runs/" + direc)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 SAVE_MODEL = 1
 LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
-TUNE = False
-DROPOUT = 0.5
-WEIGHT_DECAY = 1e-4
+TUNE = True
+DROPOUT = 0.99
+WEIGHT_DECAY = 1e-1
 
-BATCH_SIZE=32
+BATCH_SIZE=64
 
 EPOCHS = 100
-LR = 1e-2
+LR = 1e-5
 
 
 
@@ -451,17 +453,20 @@ class InceptionClassifier:
 
         
 
-    def _train_step(self, sample, optimizer, metrics, val_sample=None):
+    def _train_step(self, sample, optimizer, metrics, val_sample=None, classifier=None):
+        if classifier is None:
+            classifier = self.classifier
         metrics["scalar"] = {}
         if val_sample is not None:
             val_metrics = {}
         val_metrics = {}
+        
         X, y = sample
         X = X.to(device)
         y = y.to(device)
         # print(y.size())
         optimizer.zero_grad()
-        outputs = self.classifier(X)
+        outputs = classifier(X)
         predictions = torch.nn.functional.one_hot(outputs.argmax(axis=1), num_classes=self.n_classes)
         loss = self.loss_fn(outputs, y)
 
@@ -474,10 +479,11 @@ class InceptionClassifier:
                 metrics["scalar"][k] = self.tracking_metrics[k](y, predictions)
             # print(y.cpu().numpy().argmax(axis=1).shape, predictions.cpu().numpy().argmax(axis=1).shape)
             # quit()
-            # cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
-            # if "conf_mat" not in metrics["image"].keys():
-            #     # print(cm.shape)
-            #     metrics["image"]["conf_mat"] = cm
+            
+            if "conf_mat" not in metrics["image"].keys():
+                # print(cm.shape)
+                cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
+                metrics["image"]["conf_mat"] = cm
 
             # else:
             #     # print(cm.shape)
@@ -485,7 +491,9 @@ class InceptionClassifier:
                     
         return metrics
 
-    def _val_step(self, sample, val_metrics):
+    def _val_step(self, sample, val_metrics, classifier=None):
+        if classifier is None:
+            classifier = self.classifier
         val_metrics["scalar"] = {}
         X, y = sample
         # print(X.size())
@@ -496,7 +504,7 @@ class InceptionClassifier:
         with torch.no_grad():
             # print(X.size())
             # quit()
-            val_out = self.classifier(X)
+            val_out = classifier(X)
             predictions = torch.nn.functional.one_hot(val_out.argmax(axis=1), num_classes=self.n_classes)
             # print(val_out.size(), y.size())
             val_loss = self.loss_fn(val_out, y)
@@ -504,10 +512,11 @@ class InceptionClassifier:
             for k in self.tracking_metrics.keys():
                 val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](y, predictions)
               
-            # cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
-            # if "val_conf_mat" not in val_metrics["image"]:
+            
+            if "val_conf_mat" not in val_metrics["image"]:
             #     # print(cm.shape)
-            #     val_metrics["image"]["val_conf_mat"]  = cm
+                cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
+                val_metrics["image"]["val_conf_mat"]  = cm
 
             # else:
             #     # print(cm.shape)
@@ -541,14 +550,21 @@ class InceptionClassifier:
         total_size = (param_size + buffer_size) / 1024**2
         print(f"Model Size: {total_size:.2f} MB")
         
+        # def ray_train_func(train_iter, val_set, optimizer, train_metrics, val_metrics): 
+                
+            # for idx, val_sample in enumerate(val_set):
+            #     val_metrics = self._val_step(val_sample, val_metrics)
         
-
+        # @ray.remote
         def tune_hyperparams(config, data=None):
-            self.train_set, self.val_set = data
+            classifier = ray.get(self.classifier)
+            # print(train_set)
+            train_set, val_set = data
+            train_set = ray.get(train_set)
+            val_set = ray.get(val_set)
             # num_class, num_point, num_person, in_channels, graph
             # self.classifier = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=config["l1"], l2=config["l2"], l3=config["l3"], dropout=config["dropout"])
-            
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=config['lr'], weight_decay=WEIGHT_DECAY)
+            optimizer = torch.optim.Adam(classifier.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
             checkpoint = get_checkpoint()
             if checkpoint:
                 with checkpoint.as_directory() as checkpoint_dir:
@@ -556,14 +572,15 @@ class InceptionClassifier:
                     with open(data_path, "rb") as fp:
                         checkpoint_state = pickle.load(fp)
                     start_epoch = checkpoint_state["epoch"]
-                    self.classifier.load_state_dict(checkpoint_state["net_state_dict"])
+                    classifier.load_state_dict(checkpoint_state["net_state_dict"])
                     optimizer.load_state_dict(checkpoint_state["optimizer_state_dict"])
             else:
                 start_epoch = 0
             
             if device == "cuda":
-                self.classifier = nn.DataParallel(self.classifier, device_ids=[0], output_device=0)
-            self.classifier.to(device)
+                classifier = nn.DataParallel(classifier, device_ids=[0], output_device=0)
+            classifier.to(device)
+                       
 
         # train_samples = int((1 - test_split) * len(self.ds))
         # test_samples = int(len(self.ds) - train_samples)
@@ -594,39 +611,40 @@ class InceptionClassifier:
             for epoch in range(start_epoch, start_epoch + epochs):
                 print()
                 print(f"Epoch #{epoch + 1}: ")
-                scalar_metrics = {"train":{},
-                                "val":{}}
                 
-                val_metrics = {"scalar": {}, "image": {}}
-                val_iter = iter(self.val_set)
-                for idx, val_sample in enumerate(val_iter):
-                    val_metrics = self._val_step(val_sample, val_metrics)
-                    for k in val_metrics["scalar"].keys():
-                        if k not in scalar_metrics["val"].keys():
-                            scalar_metrics["val"][k] = 0
-                        scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(self.val_set)
-                train_iter = iter(self.train_set)
-
-                loop = tqdm(enumerate(train_iter))
                 train_metrics = {"scalar": {}, "image": {}}
-                for idx, curr_sample in loop:
-                    train_metrics = self._train_step(curr_sample, optimizer, train_metrics)
-                    for k in train_metrics["scalar"].keys():
-                        if k not in scalar_metrics["train"].keys():
-                            scalar_metrics["train"][k] = 0
+                val_metrics = {"scalar": {}, "image": {}}
+                
+                for idx, curr_sample in enumerate(train_set):
+                    train_metrics = self._train_step(curr_sample, optimizer, train_metrics, classifier=classifier)
+                for idx, val_sample in enumerate(val_set):
+                    val_metrics = self._val_step(val_sample, val_metrics, classifier=classifier)
+                # scalar_metrics = {"train":{},
+                #                 "val":{}}
+                
+                # val_metrics = {"scalar": {}, "image": {}}
+                # val_iter = iter(self.val_set)
+                    # for k in val_metrics["scalar"].keys():
+                    #     if k not in scalar_metrics["val"].keys():
+                    #         scalar_metrics["val"][k] = 0
+                    #     scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(self.val_set)
+                # train_iter = iter(self.train_set)
+
+                # # loop = tqdm(enumerate(train_iter))
+                # train_metrics = {"scalar": {}, "image": {}}
+                    # for k in train_metrics["scalar"].keys():
+                    #     if k not in scalar_metrics["train"].keys():
+                    #         scalar_metrics["train"][k] = 0
                         
-                        scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(self.train_set)
+                    #     scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(self.train_set)
                     # train.report(scalar_metrics["train"])
-                    loop.set_postfix(train_metrics["scalar"])
+                    # loop.set_postfix(train_metrics["scalar"])
                     # train_iter.set_postfix(train_metrics["scalar"])
-                # sns.heatmap(train_metrics["image"]["conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
-                # plt.xlabel("Predicted")
-                # plt.ylabel("True")
-                # writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
-                # plt.close()
+                
                 # print()
                 # print("Validation:")
                     # val_iter.set_postfix(val_metrics["scalar"])
+                # ray_train_func(iter(train_set), val_set, optimizer, train_metrics, val_metrics)
 
                 
                 
@@ -673,7 +691,7 @@ class InceptionClassifier:
                     # }, epoch)
                 checkpoint_data = {
                     "epoch":epoch,
-                    "net_state_dict": self.classifier.state_dict(),
+                    "net_state_dict": classifier.state_dict(),
                     "optimizer_state_dict":optimizer.state_dict()
                     
                 }
@@ -682,29 +700,36 @@ class InceptionClassifier:
                     with open(data_path, "wb") as fp:
                         pickle.dump(checkpoint_data, fp)
                     checkpoint = Checkpoint.from_directory(checkpoint_dir)
-                    train.report(scalar_metrics["val"], checkpoint=checkpoint)
+                    # print(val_metrics)
+                    tune.report(val_metrics['scalar'], checkpoint=checkpoint)
 
         if TUNE:
+            ray.init(num_cpus=4, num_gpus=1, include_dashboard=False)
+            self.classifier = ray.put(self.classifier)
             config = {
                 "l1": tune.choice([i for i in range(3)]),
                 "l2": tune.choice([i for i in range(3)]),
                 "l3": tune.choice([i for i in range(3)]),
                 "lr": tune.loguniform(1e-5, 1e-1),
-                "dropout": tune.loguniform(1e-1, 0.9)
+                "dropout": tune.loguniform(1e-1, 0.9),
+                "weight_decay": tune.loguniform(1e-5, 1e-1),
             }
+
+            train_ray = ray.put(self.train_set)
+            val_ray = ray.put(self.val_set)
 
 
             tuner = Tuner(
-                trainable=tune.with_parameters(tune.with_resources(tune_hyperparams, {"gpu": 1}), data=(self.total_train_set, self.total_val_set)),
+                trainable=tune.with_parameters(tune.with_resources(tune_hyperparams, {"gpu": 1}), data=(train_ray, val_ray)),
                 param_space=config,
                 tune_config=tune.TuneConfig(
                     num_samples=30,
                     scheduler=tune.schedulers.ASHAScheduler(metric="val_loss", mode="min", time_attr='epoch', max_t=30)
-                ),
-                run_config=tune.RunConfig(
-                    name="tune_hyperparams",
-                    # storage_path="C:\\\\Users\\joshua.vanstaden\\Documents\\Models\\phd_gait_methods\\Naive",
                 )
+                # run_config=tune.RunConfig(
+                #     name="tune_hyperparams",
+                #     # storage_path="C:\\\\Users\\joshua.vanstaden\\Documents\\Models\\phd_gait_methods\\Naive",
+                # )
             )
             result = tuner.fit()
 
@@ -777,3 +802,14 @@ class InceptionClassifier:
                     # train.report(scalar_metrics["train"])
                     loop.set_postfix(train_metrics["scalar"])
                 writer.add_scalars("Training", scalar_metrics["train"], epoch)
+                sns.heatmap(train_metrics["image"]["conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
+                plt.xlabel("Predicted")
+                plt.ylabel("True")
+                writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
+                plt.close()
+
+                
+                sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
+                plt.xlabel("Predicted")
+                plt.ylabel("True")
+                writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)
