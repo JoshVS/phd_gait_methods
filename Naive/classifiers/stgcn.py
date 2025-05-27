@@ -296,7 +296,9 @@ class STGCN:
 
         
 
-    def _train_step(self, sample, optimizer, metrics, val_sample=None):
+    def _train_step(self, sample, optimizer, metrics, val_sample=None, classifier=None):
+        if classifier is None:
+            classifier = self.classifier
         metrics["scalar"] = {}
         if val_sample is not None:
             val_metrics = {}
@@ -306,7 +308,7 @@ class STGCN:
         y = y.to(device)
         # print(y.size())
         optimizer.zero_grad()
-        outputs = self.classifier(X)
+        outputs = classifier(X)
         predictions = torch.nn.functional.one_hot(outputs.argmax(axis=1), num_classes=self.n_classes)
         loss = self.loss_fn(outputs, y)
 
@@ -330,14 +332,16 @@ class STGCN:
                     
         return metrics
 
-    def _val_step(self, sample, val_metrics):
+    def _val_step(self, sample, val_metrics, classifier=None):
+        if classifier is None:
+            classifier = self.classifier
         val_metrics["scalar"] = {}
         X, y = sample
         X = X.to(device)
         y = y.to(device)
         
         with torch.no_grad():
-            val_out = self.classifier(X)
+            val_out = classifier(X)
             predictions = torch.nn.functional.one_hot(val_out.argmax(axis=1), num_classes=self.n_classes)
             val_loss = self.loss_fn(val_out, y)
             val_metrics["scalar"]["val_loss"] = val_loss.item()
@@ -402,14 +406,12 @@ class STGCN:
             else:
                 start_epoch = 0
             
-            if device == "cuda":
-                classifier = nn.DataParallel(classifier, device_ids=[0], output_device=0)
+            # if device == "cuda":
+            #     classifier = nn.DataParallel(classifier, device_ids=[0], output_device=0)
             classifier.to(device)
                        
            
             train_set, val_set = data
-            train_set = ray.get(train_set)
-            val_set = ray.get(val_set)
             for epoch in range(start_epoch, start_epoch + epochs):
                 print()
                 print(f"Epoch #{epoch + 1}: ")
@@ -418,9 +420,9 @@ class STGCN:
                 val_metrics = {"scalar": {}, "image": {}}
                 
                 for idx, curr_sample in enumerate(train_set):
-                    train_metrics = self._train_step(curr_sample, optimizer, train_metrics, classifier=classifier)
+                    train_metrics = self._train_step(ray.get(curr_sample), optimizer, train_metrics, classifier=classifier)
                 for idx, val_sample in enumerate(val_set):
-                    val_metrics = self._val_step(val_sample, val_metrics, classifier=classifier)
+                    val_metrics = self._val_step(ray.get(val_sample), val_metrics, classifier=classifier)
         
                 checkpoint_data = {
                     "epoch":epoch,
@@ -437,16 +439,28 @@ class STGCN:
                     tune.report(val_metrics['scalar'], checkpoint=checkpoint)
 
         if TUNE:
-            ray.init(num_cpus=12, num_gpus=1, include_dashboard=False)
+            ray.init(num_cpus=4, num_gpus=1, include_dashboard=True)
             self.classifier = ray.put(self.classifier)
             config = {
                 "lr": tune.loguniform(1e-5, 1e-1),
                 "dropout": tune.loguniform(1e-1, 0.9),
                 "weight_decay": tune.loguniform(1e-5, 1e-1),
             }
+            # test_config = {
+            #     "lr": 1e-5,
+            #     "dropout": 0.25,
+            #     "weight_decay": 1e-5
+            # }
+            train_ray = [None] * self.train_set.num_batches
+            for i in range(self.train_set.num_batches):
+                train_ray[i] = ray.put(self.train_set[i])
 
-            train_ray = ray.put(self.train_set)
-            val_ray = ray.put(self.val_set)
+            val_ray = [None] * self.val_set.num_batches
+            for i in range(self.val_set.num_batches):
+                val_ray[i] = ray.put(self.val_set[i])
+
+            # tune_hyperparams(config=test_config, data=(train_ray, val_ray))
+            # quit()
 
 
             tuner = Tuner(

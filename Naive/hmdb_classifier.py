@@ -49,9 +49,12 @@ class TrainValDataset(Dataset):
         self.num_person = ds.X.shape[-1]
         self.X = manual_batch(X)
         self.y = manual_batch(y)
+        self.num_batches = len(self.X)
         self.length = sum([x.size()[0] for x in self.X])
         # print(X.size()[2])
         # quit()
+
+    
 
     
     def __len__(self):
@@ -94,7 +97,7 @@ exclude = [
 exclude=None
 my_ds = HMDBDataset(generate_test_video=None, 
                     max_samples=None,
-                    max_classes=None, 
+                    max_classes=10, 
                     min_samples = 10, 
                     exclude_classes=exclude, 
                     num_timesteps=10)
