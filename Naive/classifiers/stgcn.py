@@ -22,21 +22,27 @@ import matplotlib.pyplot as plt
 from torch.nn.functional import softmax
 from ray import train
 from ray import tune
+import ray
 from ray.tune.tuner import Tuner
 from ray.train import Checkpoint, get_checkpoint
 from ray.tune.schedulers import ASHAScheduler
 import ray.cloudpickle as pickle
 from pathlib import Path
 import tempfile
+import asyncio
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.system("rm -rf runs/*")
+os.system("kill $(ps -e | grep 'tensorboard' | awk '{print $1}')")
+async def start_tensorboard(direc):
+    await asyncio.create_subprocess_shell("tensorboard --port 6006 --logdir=runs/" + direc)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 SAVE_MODEL = 1
 LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
-TUNE = False
+TUNE = True
 DROPOUT = 0.25
 WEIGHT_DECAY = 1e-5
 
@@ -222,8 +228,7 @@ class MarcSTGCN(nn.Module):
         """
         X: Shape (batch, channels, time, nodes, people)
         """
-        # n -> batch size, C -> channels 3, T -> num frames, V -> num joints, M -> num persons
-      
+        
         N, C, T, V, M = x.size()
         x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T) # (batch, people * nodes * channels, times)
         
@@ -252,7 +257,7 @@ class STGCN:
         self.n_classes = ds.n_classes
         self.class_names = ds.classes
         self.n_point = ds.n_point
-        self.num_person = 1
+        self.num_person = ds.num_person
         self.in_channels = ds.in_channels
         self.loss_fn = loss_fn
 
@@ -358,8 +363,14 @@ class STGCN:
         
         self.total_train_set = DataLoader(self.train_set, batch_size=batch_size, shuffle=False)
         self.total_val_set = DataLoader(self.val_set, batch_size=batch_size, shuffle=False)
-        
-        self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=3, l2=3, l3=3, dropout=0.5)        
+
+        t = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[2] / 2) / 2) / 2)
+        h = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[3] / 2) / 2) / 2) // 2
+        w = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[4] / 2) / 2) / 2)
+        # print((t,h,w))
+        # quit()
+
+        self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, dropout=DROPOUT).to(device)        
         param_size = 0
         for param in self.classifier.parameters():
             param_size += param.nelement() * param.element_size()
@@ -370,13 +381,15 @@ class STGCN:
         total_size = (param_size + buffer_size) / 1024**2
         print(f"Model Size: {total_size:.2f} MB")
         
+        # def ray_train_func(train_iter, val_set, optimizer, train_metrics, val_metrics): 
+                
+            # for idx, val_sample in enumerate(val_set):
+            #     val_metrics = self._val_step(val_sample, val_metrics)
         
-
+        # @ray.remote
         def tune_hyperparams(config, data=None):
-            self.train_set, self.val_set = data
-            self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=config["l1"], l2=config["l2"], l3=config["l3"], dropout=config["dropout"])
-            
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=config['lr'], weight_decay=WEIGHT_DECAY)
+            classifier = ray.get(self.classifier)
+            optimizer = torch.optim.Adam(classifier.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
             checkpoint = get_checkpoint()
             if checkpoint:
                 with checkpoint.as_directory() as checkpoint_dir:
@@ -384,124 +397,34 @@ class STGCN:
                     with open(data_path, "rb") as fp:
                         checkpoint_state = pickle.load(fp)
                     start_epoch = checkpoint_state["epoch"]
-                    self.classifier.load_state_dict(checkpoint_state["net_state_dict"])
+                    classifier.load_state_dict(checkpoint_state["net_state_dict"])
                     optimizer.load_state_dict(checkpoint_state["optimizer_state_dict"])
             else:
                 start_epoch = 0
             
             if device == "cuda":
-                self.classifier = nn.DataParallel(self.classifier, device_ids=[0], output_device=0)
-            self.classifier.to(device)
-
-        # train_samples = int((1 - test_split) * len(self.ds))
-        # test_samples = int(len(self.ds) - train_samples)
-        # val_samples = int(val_split * train_samples)
-        # train_samples = int(train_samples - val_samples)
-        # self.train_set, self.test_set, self.val_set = torch.utils.data.random_split(self.ds, [train_samples, test_samples, val_samples])
-        # self.val_set = self.val_set.to(device)
-
-        # quit()
-        # print(len(self.train_set))
-        # quit()
-
-
-            # optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
-
-            # writer = SummaryWriter()
-
-        # for epoch in range(epochs):
-        #     train_iter = iter(self.train_set)
-        #     curr_sample = next(train_iter)
-        #     while curr_sample is not None:
-        #         self._train_step(curr_sample, optimizer)
-        #         curr_sample = next(train_iter)
-        
-
-            # print(f"Training with {self.time_steps} time steps and {self.n_classes} classes")
-            # print(f"Training on device {device}")
+                classifier = nn.DataParallel(classifier, device_ids=[0], output_device=0)
+            classifier.to(device)
+                       
+           
+            train_set, val_set = data
+            train_set = ray.get(train_set)
+            val_set = ray.get(val_set)
             for epoch in range(start_epoch, start_epoch + epochs):
                 print()
                 print(f"Epoch #{epoch + 1}: ")
-                scalar_metrics = {"train":{},
-                                "val":{}}
                 
-                val_metrics = {"scalar": {}, "image": {}}
-                val_iter = iter(self.val_set)
-                for idx, val_sample in enumerate(val_iter):
-                    val_metrics = self._val_step(val_sample, val_metrics)
-                    for k in val_metrics["scalar"].keys():
-                        if k not in scalar_metrics["val"].keys():
-                            scalar_metrics["val"][k] = 0
-                        scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(val_iter)
-                train_iter = iter(self.train_set)
-
-                loop = tqdm(enumerate(train_iter))
                 train_metrics = {"scalar": {}, "image": {}}
-                for idx, curr_sample in loop:
-                    train_metrics = self._train_step(curr_sample, optimizer, train_metrics)
-                    for k in train_metrics["scalar"].keys():
-                        if k not in scalar_metrics["train"].keys():
-                            scalar_metrics["train"][k] = 0
-                        
-                        scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(train_iter)
-                    # train.report(scalar_metrics["train"])
-                    loop.set_postfix(train_metrics["scalar"])
-                    # train_iter.set_postfix(train_metrics["scalar"])
-                # sns.heatmap(train_metrics["image"]["conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
-                # plt.xlabel("Predicted")
-                # plt.ylabel("True")
-                # writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
-                # plt.close()
-                # print()
-                # print("Validation:")
-                    # val_iter.set_postfix(val_metrics["scalar"])
-
+                val_metrics = {"scalar": {}, "image": {}}
                 
-                
-                # if SAVE_MODEL is not None:
-                #     if (epoch + 1) % SAVE_MODEL == 0:
-                #         curr_metrics = np.sum(list(scalar_metrics["val"].values()))
-                #         if False:#curr_metrics < prev_metrics:
-                #             print("Current Metrics not as good, skipping")
-                #         else:
-                #             prev_metrics = curr_metrics
-                #             m_name = f"epoch_{epoch + 1}"
-                #             for k in scalar_metrics["val"].keys():
-                #                 m_name += f"_{k}_{scalar_metrics['val'][k]:.2f}"
-                #             if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}")):
-                #                 os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}"))
-                #             if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}")):
-                #                 os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}"))
-                #             filename = os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}", m_name+".pt")
-                #             print(f"Saving model to {filename}")
-                #             torch.save(self.classifier.state_dict(), filename)
-                    
-                # fig = plt.figure()
-                # image = torch.image.decode_png(fig.getvalue(), channels=4)
-
-                # sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
-                # plt.xlabel("Predicted")
-                # plt.ylabel("True")
-                # plt.imshow(hm)
-                # quit()
-                # hm = fig
-                # img_flat = np.frombuffer(fig.canvas.draw().tostring_rgb(), dtype='uint8')
-                # image = img_flat.reshape(*reversed(img_flat.get_width_height), 3)
-                # writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)
-                # plt.close()
-                # print("##################")
-                # for k in scalar_metrics["train"].keys():
-                #     v = scalar_metrics["train"][k]
-                #     v_val = scalar_metrics["val"]["val_" + k]
-                    # print(f"{k.capitalize()}: {v:.3f}")
-                    # print(f"{('val_' + k).capitalize()}: {v_val:.3f}")
-                    # print("##################")
-                    # writer.add_scalars(k.capitalize(), {"train": v,
-                    #                                     "validation":v_val
-                    # }, epoch)
+                for idx, curr_sample in enumerate(train_set):
+                    train_metrics = self._train_step(curr_sample, optimizer, train_metrics, classifier=classifier)
+                for idx, val_sample in enumerate(val_set):
+                    val_metrics = self._val_step(val_sample, val_metrics, classifier=classifier)
+        
                 checkpoint_data = {
                     "epoch":epoch,
-                    "net_state_dict": self.classifier.state_dict(),
+                    "net_state_dict": classifier.state_dict(),
                     "optimizer_state_dict":optimizer.state_dict()
                     
                 }
@@ -510,25 +433,35 @@ class STGCN:
                     with open(data_path, "wb") as fp:
                         pickle.dump(checkpoint_data, fp)
                     checkpoint = Checkpoint.from_directory(checkpoint_dir)
-                    train.report(scalar_metrics["val"], checkpoint=checkpoint)
+                    # print(val_metrics)
+                    tune.report(val_metrics['scalar'], checkpoint=checkpoint)
 
         if TUNE:
+            ray.init(num_cpus=12, num_gpus=1, include_dashboard=False)
+            self.classifier = ray.put(self.classifier)
             config = {
-                "l1": tune.choice([i for i in range(3)]),
-                "l2": tune.choice([i for i in range(3)]),
-                "l3": tune.choice([i for i in range(3)]),
                 "lr": tune.loguniform(1e-5, 1e-1),
-                "dropout": tune.loguniform(1e-1, 0.9)
+                "dropout": tune.loguniform(1e-1, 0.9),
+                "weight_decay": tune.loguniform(1e-5, 1e-1),
             }
+
+            train_ray = ray.put(self.train_set)
+            val_ray = ray.put(self.val_set)
 
 
             tuner = Tuner(
-                trainable=tune.with_parameters(tune.with_resources(tune_hyperparams, {"gpu": 1}), data=(self.total_train_set, self.total_val_set)),
+                trainable=tune.with_parameters(tune.with_resources(tune_hyperparams, {"gpu": 1}), data=(train_ray, val_ray)),
                 param_space=config,
                 tune_config=tune.TuneConfig(
+                    metric="val_loss",
+                    mode="min",
                     num_samples=30,
-                    scheduler=tune.schedulers.ASHAScheduler(metric="val_loss", mode="min", time_attr='epoch', max_t=30)
+                    scheduler=tune.schedulers.ASHAScheduler(time_attr='epoch', max_t=30)
                 )
+                # run_config=tune.RunConfig(
+                #     name="tune_hyperparams",
+                #     # storage_path="C:\\\\Users\\joshua.vanstaden\\Documents\\Models\\phd_gait_methods\\Naive",
+                # )
             )
             result = tuner.fit()
 
@@ -538,14 +471,14 @@ class STGCN:
             #     config=config,
             #     scheduler=scheduler
             # )
-            print(dir(result.get_best_result()))
+            print(dir(result.get_best_result(metric="val_loss", mode="min")))
             best_trial = result.get_best_result()
             print(f"Best trial config: \t {best_trial.config}")
             print(f"Best Trial Final Validation Metrics: \t {best_trial.metrics_dataframe}")
 
-            best_trained_model = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=best_trial.config["l1"], l2=best_trial.config["l2"], l3=best_trial.config["l3"], dropout=best_trial.config["dropout"]).to(device)
+            best_trained_model = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, dropout=best_trial.config["dropout"]).to(device)
 
-            best_checkpoint = best_trial.get_best_checkpoint(trial=best_trial, metric="val_accuracy", mode="max")
+            best_checkpoint = best_trial.get_best_checkpoint(metric="val_accuracy", mode="max")
 
             with best_checkpoint.as_directory() as checkpoint_dir:
                 data_path = Path(checkpoint_dir) / "data.pkl"
@@ -554,14 +487,61 @@ class STGCN:
 
                 best_trained_model.load_state_dict(best_checkpoint_data["net_state_dict"])
         else:
-            config = {
-                "l1": 1,
-                "l2": 2,
-                "l3": 3,
-                "lr": 1e-2,
-                "dropout": 0.5
-            }
-            tune_hyperparams(config, data=(self.total_train_set, self.total_val_set))
+            writer = SummaryWriter()
+            asyncio.run(start_tensorboard(os.listdir("runs")[-1]))
+          
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+            for epoch in range(0, epochs):
+                # print(self.val_set.ds.X.size())
+                # quit()
 
+                print()
+                print(f"Epoch #{epoch + 1}: ")
+                scalar_metrics = {"train":{},
+                                "val":{}}
+                
+                val_metrics = {"scalar": {}, "image": {}}
+                # print(self.val_set.X[0].size())
+                # quit()
+                val_iter = iter(self.val_set)
+                for idx, val_sample in enumerate(val_iter):
+                    # print(val_sample[0].size())
+                    # quit()
+                    val_metrics = self._val_step(val_sample, val_metrics)
+                    for k in val_metrics["scalar"].keys():
+                        if k not in scalar_metrics["val"].keys():
+                            scalar_metrics["val"][k] = 0
+                        scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(self.val_set.X)
+                train_iter = iter(self.train_set)
+                print("##################")
+                for k in scalar_metrics["val"].keys():
+                
+                    print(f"{k.capitalize()}: {scalar_metrics['val'][k]:.3f}")
+                print("##################")
+                writer.add_scalars("Validation", scalar_metrics["val"], epoch)
+                # print("GOT HERE")
+                # quit()
 
+                loop = tqdm(enumerate(train_iter))
+                train_metrics = {"scalar": {}, "image": {}}
+                for idx, curr_sample in loop:
+                    train_metrics = self._train_step(curr_sample, optimizer, train_metrics)
+                    for k in train_metrics["scalar"].keys():
+                        if k not in scalar_metrics["train"].keys():
+                            scalar_metrics["train"][k] = 0
+                        
+                        scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(self.train_set.X)
+                    # train.report(scalar_metrics["train"])
+                    loop.set_postfix(train_metrics["scalar"])
+                writer.add_scalars("Training", scalar_metrics["train"], epoch)
+                sns.heatmap(train_metrics["image"]["conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
+                plt.xlabel("Predicted")
+                plt.ylabel("True")
+                writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
+                plt.close()
 
+                
+                sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
+                plt.xlabel("Predicted")
+                plt.ylabel("True")
+                writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)
