@@ -557,11 +557,6 @@ class InceptionClassifier:
         # @ray.remote
         def tune_hyperparams(config, data=None):
             classifier = ray.get(self.classifier)
-            # print(train_set)
-            train_set, val_set = data
-            train_set = ray.get(train_set)
-            val_set = ray.get(val_set)
-            # num_class, num_point, num_person, in_channels, graph
             optimizer = torch.optim.Adam(classifier.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
             checkpoint = get_checkpoint()
             if checkpoint:
@@ -579,33 +574,10 @@ class InceptionClassifier:
                 classifier = nn.DataParallel(classifier, device_ids=[0], output_device=0)
             classifier.to(device)
                        
-
-        # train_samples = int((1 - test_split) * len(self.ds))
-        # test_samples = int(len(self.ds) - train_samples)
-        # val_samples = int(val_split * train_samples)
-        # train_samples = int(train_samples - val_samples)
-        # self.train_set, self.test_set, self.val_set = torch.utils.data.random_split(self.ds, [train_samples, test_samples, val_samples])
-        # self.val_set = self.val_set.to(device)
-
-        # quit()
-        # print(len(self.train_set))
-        # quit()
-
-
-            # optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
-
-            
-
-        # for epoch in range(epochs):
-        #     train_iter = iter(self.train_set)
-        #     curr_sample = next(train_iter)
-        #     while curr_sample is not None:
-        #         self._train_step(curr_sample, optimizer)
-        #         curr_sample = next(train_iter)
-        
-
-            # print(f"Training with {self.time_steps} time steps and {self.n_classes} classes")
-            # print(f"Training on device {device}")
+           
+            train_set, val_set = data
+            train_set = ray.get(train_set)
+            val_set = ray.get(val_set)
             for epoch in range(start_epoch, start_epoch + epochs):
                 print()
                 print(f"Epoch #{epoch + 1}: ")
@@ -617,76 +589,7 @@ class InceptionClassifier:
                     train_metrics = self._train_step(curr_sample, optimizer, train_metrics, classifier=classifier)
                 for idx, val_sample in enumerate(val_set):
                     val_metrics = self._val_step(val_sample, val_metrics, classifier=classifier)
-                # scalar_metrics = {"train":{},
-                #                 "val":{}}
-                
-                # val_metrics = {"scalar": {}, "image": {}}
-                # val_iter = iter(self.val_set)
-                    # for k in val_metrics["scalar"].keys():
-                    #     if k not in scalar_metrics["val"].keys():
-                    #         scalar_metrics["val"][k] = 0
-                    #     scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(self.val_set)
-                # train_iter = iter(self.train_set)
-
-                # # loop = tqdm(enumerate(train_iter))
-                # train_metrics = {"scalar": {}, "image": {}}
-                    # for k in train_metrics["scalar"].keys():
-                    #     if k not in scalar_metrics["train"].keys():
-                    #         scalar_metrics["train"][k] = 0
-                        
-                    #     scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(self.train_set)
-                    # train.report(scalar_metrics["train"])
-                    # loop.set_postfix(train_metrics["scalar"])
-                    # train_iter.set_postfix(train_metrics["scalar"])
-                
-                # print()
-                # print("Validation:")
-                    # val_iter.set_postfix(val_metrics["scalar"])
-                # ray_train_func(iter(train_set), val_set, optimizer, train_metrics, val_metrics)
-
-                
-                
-                # if SAVE_MODEL is not None:
-                #     if (epoch + 1) % SAVE_MODEL == 0:
-                #         curr_metrics = np.sum(list(scalar_metrics["val"].values()))
-                #         if False:#curr_metrics < prev_metrics:
-                #             print("Current Metrics not as good, skipping")
-                #         else:
-                #             prev_metrics = curr_metrics
-                #             m_name = f"epoch_{epoch + 1}"
-                #             for k in scalar_metrics["val"].keys():
-                #                 m_name += f"_{k}_{scalar_metrics['val'][k]:.2f}"
-                #             if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}")):
-                #                 os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}"))
-                #             if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}")):
-                #                 os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}"))
-                #             filename = os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}", m_name+".pt")
-                #             print(f"Saving model to {filename}")
-                #             torch.save(self.classifier.state_dict(), filename)
-                    
-                # fig = plt.figure()
-                # image = torch.image.decode_png(fig.getvalue(), channels=4)
-
-                # sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
-                # plt.xlabel("Predicted")
-                # plt.ylabel("True")
-                # plt.imshow(hm)
-                # quit()
-                # hm = fig
-                # img_flat = np.frombuffer(fig.canvas.draw().tostring_rgb(), dtype='uint8')
-                # image = img_flat.reshape(*reversed(img_flat.get_width_height), 3)
-                # writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)
-                # plt.close()
-                # print("##################")
-                # for k in scalar_metrics["train"].keys():
-                #     v = scalar_metrics["train"][k]
-                #     v_val = scalar_metrics["val"]["val_" + k]
-                    # print(f"{k.capitalize()}: {v:.3f}")
-                    # print(f"{('val_' + k).capitalize()}: {v_val:.3f}")
-                    # print("##################")
-                    # writer.add_scalars(k.capitalize(), {"train": v,
-                    #                                     "validation":v_val
-                    # }, epoch)
+        
                 checkpoint_data = {
                     "epoch":epoch,
                     "net_state_dict": classifier.state_dict(),
@@ -702,7 +605,7 @@ class InceptionClassifier:
                     tune.report(val_metrics['scalar'], checkpoint=checkpoint)
 
         if TUNE:
-            ray.init(num_cpus=4, num_gpus=1, include_dashboard=False)
+            ray.init(num_cpus=12, num_gpus=1, include_dashboard=False)
             self.classifier = ray.put(self.classifier)
             config = {
                 "lr": tune.loguniform(1e-5, 1e-1),
