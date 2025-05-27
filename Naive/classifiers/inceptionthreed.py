@@ -57,7 +57,7 @@ WEIGHT_DECAY = 1e-1
 
 BATCH_SIZE=64
 
-EPOCHS = 100
+EPOCHS = 10
 LR = 1e-5
 
 
@@ -241,8 +241,7 @@ class InceptionI3dGraph(nn.Module):
     )
 
     def __init__(self, num_class, num_point, num_person, in_channels, graph, spatial_squeeze=True,
-                 final_endpoint='Logits', name='inception_i3d',  dropout_keep_prob=0.5, l1=1, l2=1, l3=1,
-                 dropout=0.5, thw=(2,2,7)):
+                 final_endpoint='Logits', name='inception_i3d',  dropout_keep_prob=0.5, thw=(2,2,7)):
         
         # num_class, num_point, num_person, in_channels, graph
         """Initializes I3D model instance.
@@ -539,7 +538,7 @@ class InceptionClassifier:
         # print((t,h,w))
         # quit()
 
-        self.classifier = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=3, l2=3, l3=3, dropout=0.5, thw=(t, h, w)).to(device)        
+        self.classifier = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, dropout_keep_prob=(1-DROPOUT), thw=(t, h, w)).to(device)        
         param_size = 0
         for param in self.classifier.parameters():
             param_size += param.nelement() * param.element_size()
@@ -563,7 +562,6 @@ class InceptionClassifier:
             train_set = ray.get(train_set)
             val_set = ray.get(val_set)
             # num_class, num_point, num_person, in_channels, graph
-            # self.classifier = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=config["l1"], l2=config["l2"], l3=config["l3"], dropout=config["dropout"])
             optimizer = torch.optim.Adam(classifier.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
             checkpoint = get_checkpoint()
             if checkpoint:
@@ -707,9 +705,6 @@ class InceptionClassifier:
             ray.init(num_cpus=4, num_gpus=1, include_dashboard=False)
             self.classifier = ray.put(self.classifier)
             config = {
-                "l1": tune.choice([i for i in range(3)]),
-                "l2": tune.choice([i for i in range(3)]),
-                "l3": tune.choice([i for i in range(3)]),
                 "lr": tune.loguniform(1e-5, 1e-1),
                 "dropout": tune.loguniform(1e-1, 0.9),
                 "weight_decay": tune.loguniform(1e-5, 1e-1),
@@ -723,8 +718,10 @@ class InceptionClassifier:
                 trainable=tune.with_parameters(tune.with_resources(tune_hyperparams, {"gpu": 1}), data=(train_ray, val_ray)),
                 param_space=config,
                 tune_config=tune.TuneConfig(
+                    metric="val_loss",
+                    mode="min",
                     num_samples=30,
-                    scheduler=tune.schedulers.ASHAScheduler(metric="val_loss", mode="min", time_attr='epoch', max_t=30)
+                    scheduler=tune.schedulers.ASHAScheduler(time_attr='epoch', max_t=30)
                 )
                 # run_config=tune.RunConfig(
                 #     name="tune_hyperparams",
@@ -739,14 +736,14 @@ class InceptionClassifier:
             #     config=config,
             #     scheduler=scheduler
             # )
-            print(dir(result.get_best_result()))
+            print(dir(result.get_best_result(metric="val_loss", mode="min")))
             best_trial = result.get_best_result()
             print(f"Best trial config: \t {best_trial.config}")
             print(f"Best Trial Final Validation Metrics: \t {best_trial.metrics_dataframe}")
 
-            best_trained_model = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, l1=best_trial.config["l1"], l2=best_trial.config["l2"], l3=best_trial.config["l3"], dropout=best_trial.config["dropout"]).to(device)
+            best_trained_model = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, dropout_keep_prob=(1-best_trial.config["dropout"])).to(device)
 
-            best_checkpoint = best_trial.get_best_checkpoint(trial=best_trial, metric="val_accuracy", mode="max")
+            best_checkpoint = best_trial.get_best_checkpoint(metric="val_accuracy", mode="max")
 
             with best_checkpoint.as_directory() as checkpoint_dir:
                 data_path = Path(checkpoint_dir) / "data.pkl"
