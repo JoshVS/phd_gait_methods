@@ -46,9 +46,9 @@ TUNE = True
 DROPOUT = 0.25
 WEIGHT_DECAY = 1e-5
 
-BATCH_SIZE=8
+BATCH_SIZE=1024
 
-EPOCHS = 2
+EPOCHS = 200
 LR = 1e-5
 
 def force_cudnn_initialization():
@@ -365,8 +365,8 @@ class STGCN:
 
     def train(self,  lr=LR, momentum=0.9, epochs=EPOCHS, batch_size=BATCH_SIZE):
         
-        self.total_train_set = DataLoader(self.train_set, batch_size=batch_size, shuffle=False)
-        self.total_val_set = DataLoader(self.val_set, batch_size=batch_size, shuffle=False)
+        self.train_set.to(device)
+        self.val_set.to(device)
 
         t = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[2] / 2) / 2) / 2)
         h = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[3] / 2) / 2) / 2) // 2
@@ -420,9 +420,13 @@ class STGCN:
                 val_metrics = {"scalar": {}, "image": {}}
                 
                 for idx, curr_sample in enumerate(train_set):
-                    train_metrics = self._train_step(ray.get(curr_sample), optimizer, train_metrics, classifier=classifier)
+                    cs = ray.get(curr_sample)
+                    train_metrics = self._train_step(cs, optimizer, train_metrics, classifier=classifier)
+                    del cs
                 for idx, val_sample in enumerate(val_set):
-                    val_metrics = self._val_step(ray.get(val_sample), val_metrics, classifier=classifier)
+                    vs = ray.get(val_sample)
+                    val_metrics = self._val_step(vs, val_metrics, classifier=classifier)
+                    del vs
         
                 checkpoint_data = {
                     "epoch":epoch,

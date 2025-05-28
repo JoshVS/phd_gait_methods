@@ -29,7 +29,6 @@ class CASIATorchDataset(Dataset):
         self.targets = self.ds.y
 
 
-
     def __len__(self):
         return self.ds.X.shape[0]
     
@@ -55,7 +54,9 @@ class TrainValDataset(Dataset):
         # quit()
 
     
-
+    def to(self, device):
+        self.X = [x.to(device) for x in self.X]
+        self.y = [y.to(device) for y in self.y]
     
     def __len__(self):
         return self.length
@@ -97,7 +98,7 @@ exclude = [
 exclude=None
 my_ds = HMDBDataset(generate_test_video=None, 
                     max_samples=None,
-                    max_classes=10, 
+                    max_classes=5, 
                     min_samples = 10, 
                     exclude_classes=exclude, 
                     num_timesteps=10)

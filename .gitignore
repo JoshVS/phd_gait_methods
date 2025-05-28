@@ -9,6 +9,9 @@ __pycache__/
 *.yaml
 *latest-run*
 
+Naive/data/
+*prometheus*
+
 *.pt
 
 *events*
