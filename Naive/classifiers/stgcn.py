@@ -42,14 +42,14 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 SAVE_MODEL = 1
 LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
-TUNE = True
-DROPOUT = 0.25
-WEIGHT_DECAY = 1e-5
+TUNE = False
+DROPOUT = 0.99
+WEIGHT_DECAY = 1e-2
 
-BATCH_SIZE=1024
+BATCH_SIZE=32
 
-EPOCHS = 200
-LR = 1e-5
+EPOCHS = 1000
+LR = 1e-3
 
 def force_cudnn_initialization():
     if device == "cuda":
@@ -321,14 +321,14 @@ class STGCN:
                 metrics["scalar"][k] = self.tracking_metrics[k](y, predictions)
             # print(y.cpu().numpy().argmax(axis=1).shape, predictions.cpu().numpy().argmax(axis=1).shape)
             # quit()
-            # cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
-            # if "conf_mat" not in metrics["image"].keys():
-            #     # print(cm.shape)
-            #     metrics["image"]["conf_mat"] = cm
+            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
+            if "conf_mat" not in metrics["image"].keys():
+                # print(cm.shape)
+                metrics["image"]["conf_mat"] = cm
 
-            # else:
-            #     # print(cm.shape)
-            #     metrics["image"]["conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
+            else:
+                # print(cm.shape)
+                metrics["image"]["conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
                     
         return metrics
 
@@ -348,15 +348,15 @@ class STGCN:
             for k in self.tracking_metrics.keys():
                 val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](y, predictions)
 
-            # cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
-            # if "val_conf_mat" not in val_metrics["image"]:
-            #     # print(cm.shape)
-            #     val_metrics["image"]["val_conf_mat"]  = cm
+            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
+            if "val_conf_mat" not in val_metrics["image"]:
+                # print(cm.shape)
+                val_metrics["image"]["val_conf_mat"]  = cm
 
-            # else:
-            #     # print(cm.shape)
-            #     # print(val_metrics["image"]["val_conf_mat"].shape, cm.shape)
-            #     val_metrics["image"]["val_conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
+            else:
+                # print(cm.shape)
+                # print(val_metrics["image"]["val_conf_mat"].shape, cm.shape)
+                val_metrics["image"]["val_conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
 
         
 
@@ -414,7 +414,7 @@ class STGCN:
             train_set, val_set = data
             for epoch in range(start_epoch, start_epoch + epochs):
                 print()
-                print(f"Epoch #{epoch + 1}: ")
+                print(f"Epoch #{epoch + 1}: {self.num_timesteps} Timesteps")
                 
                 train_metrics = {"scalar": {}, "image": {}}
                 val_metrics = {"scalar": {}, "image": {}}

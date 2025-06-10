@@ -266,6 +266,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         # self.scaling_vector()
         # quit()     
         # self.X, self.y = self.get_individual_steps()
+        self.stratify_y = self.y.copy()
    
         self.interpolate_by_time()
         # print(self.y)
@@ -435,14 +436,15 @@ class ShopLiftingDataset(GenericGaitDataset):
         # quit()
 
     def convert_to_one_hot(self):
-        onehot_mat = np.zeros((len(self.y), self.n_classes))
+        onehot_mat = np.zeros((self.y.shape[0], self.y.shape[1], self.n_classes))
         # print(onehot_mat.shape)
         # print(max(self.y))
         # print(np.unique(self.y))
         # quit()
         for i in range(onehot_mat.shape[0]):
             # print(i, dim(self.y), self.y)
-            onehot_mat[i, self.y[i]] = 1
+            for j in range(onehot_mat.shape[1]):
+                onehot_mat[i, j, self.y[i, j]] = 1
         return onehot_mat
 
 
@@ -451,7 +453,13 @@ class ShopLiftingDataset(GenericGaitDataset):
         # print(dim(self.X))
         # print([len(x) for x in self.X])
         # quit()
+        new_y = []
         for i in range(len(self.X)):
+            curr_class = self.y[i]
+            if self.classes[curr_class] == 'Normal':
+                new_y.append([curr_class] * min_frames)
+            else:
+                new_y.append(([curr_class] * (min_frames//2)) + ([abs(curr_class - 1)] * (min_frames - min_frames//2)))
             for j in range(len(self.X[i])):
                 curr_sample = self.X[i][j]
                 if len(curr_sample) == 1:
@@ -473,6 +481,7 @@ class ShopLiftingDataset(GenericGaitDataset):
                 self.X[i][j] = ynew
         if convert_to_numpy:
             self.X = np.array(self.X, dtype=np.double)
+            self.y = np.array(new_y, dtype=np.int32)
 
     def split_train_and_test(self):
         # print(dim(self.y))
@@ -643,7 +652,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         return reshaped_skel
 
     def create_file_data(self, kp_dict, max_samples, max_classes):
-        if not os.path.exists(os.path.join(self.directory, "cached/")):
+        if not os.path.exists(os.path.join(self.directory, f"cached/")):
             os.makedirs(os.path.join(self.directory, "cached/"))
         # subdirs = os.listdir(self.directory)
         # classes = []
