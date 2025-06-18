@@ -12,6 +12,8 @@ __pycache__/
 Naive/data/
 *prometheus*
 
+*weights*
+
 *.pt
 
 *events*

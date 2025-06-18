@@ -39,14 +39,26 @@ async def start_tensorboard(direc):
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-SAVE_MODEL = 1
-LOAD_MODEL = True
+SAVE_MODEL = 50
+LOAD_MODEL = False
 MODEL_NAME = "model_checkpoints"
 TUNE = False
-DROPOUT = 0.99
-WEIGHT_DECAY = 1e-2
+DROPOUT = 0.5
+WEIGHT_DECAY = 1e-3
+WEIGHTS_PATH = "shoplifting.pth"
 
-BATCH_SIZE=32
+if not os.path.exists(os.path.join("weights", "train", MODEL_NAME)):
+    os.makedirs(os.path.join("weights", "train", MODEL_NAME))
+
+
+if not os.path.exists(os.path.join("weights", "finished")):
+    os.makedirs(os.path.join("weights", "finished"))
+
+L1 = 3
+L2 = 3
+L3 = 3
+
+BATCH_SIZE=16
 
 EPOCHS = 1000
 LR = 1e-3
@@ -185,7 +197,7 @@ class ST_GCN_block(nn.Module):
 
 
 class MarcSTGCN(nn.Module):
-    def __init__(self, num_class, num_point, num_person, in_channels, graph, cuda_=torch.cuda.is_available(), l1=1, l2=1, l3=1, dropout=DROPOUT):
+    def __init__(self, num_class, num_point, num_person, in_channels, graph, num_timestep, cuda_=torch.cuda.is_available(), l1=L1, l2=L2, l3=L3, dropout=DROPOUT):
         super(MarcSTGCN, self).__init__()
 
         self.graph = graph
@@ -221,8 +233,8 @@ class MarcSTGCN(nn.Module):
 
         self.layers = nn.ModuleDict(layer_dict)
 
-        self.fc = nn.Linear(256, num_class)
-        weights_init(self.fc, bs=num_class)
+        self.fc = nn.Linear(256, num_class * num_timestep)
+        weights_init(self.fc, bs=num_class * num_timestep)
 
     def forward(self, x):
         """
@@ -242,7 +254,7 @@ class MarcSTGCN(nn.Module):
         x = x.view(N, M, c_new, -1) # (batch, people, new_channel_size, times * nodes)
         x = x.mean(3).mean(1) # Take mean across times*nodes and people
         # return softmax(self.fc(x), dim=1) # in shape: (batch, new_channel_size)
-        return self.fc(x)
+        return self.fc(x).view(N, T, -1) # in shape: (batch, times, num_classes)
 
 class STGCN:
     def __init__(self, ds, loss_fn=torch.nn.functional.cross_entropy, model_name=MODEL_NAME):
@@ -266,19 +278,19 @@ class STGCN:
         # self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph).to(device)
         # if not os.path.exists(model_name):
         #     os.makedirs(model_name)
-        # if LOAD_MODEL:
-        #     if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}")):
-        #         print("No models found, creating a new one")
-        #     elif not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}")):
-        #         print("No models found, creating a new one")
-        #     else:
-        #         model_names = os.listdir(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}"))
-        #         if len(model_names) == 0:
-        #             print("No models found, creating a new one")
-        #         else:
-        #             model_files = os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}", model_names[-1])#os.path.join(model_name, model_names[-1])
-        #             print(f"Loading model from {model_files}")
-        #             self.classifier.load_state_dict(torch.load(model_files))
+        if LOAD_MODEL:
+            if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}")):
+                print("No models found, creating a new one")
+            elif not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}")):
+                print("No models found, creating a new one")
+            else:
+                model_names = os.listdir(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}"))
+                if len(model_names) == 0:
+                    print("No models found, creating a new one")
+                else:
+                    model_files = os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}", model_names[-1])#os.path.join(model_name, model_names[-1])
+                    print(f"Loading model from {model_files}")
+                    self.classifier.load_state_dict(torch.load(model_files))
 
         self.tracking_metrics = {
             # "precision": lambda x,y: precision(x, y, 'multilabel', num_classes=self.n_classes),
@@ -304,15 +316,14 @@ class STGCN:
             val_metrics = {}
         val_metrics = {}
         X, y = sample
-        print(y)
-        quit()
         X = X.to(device)
-        y = y.to(device)
+        y = y.to(device).view(y.size(0), -1)  # Flatten the labels to match the output shape of the classifier
         # print(y.size())
         optimizer.zero_grad()
         outputs = classifier(X)
-        predictions = torch.nn.functional.one_hot(outputs.argmax(axis=1), num_classes=self.n_classes)
-        loss = self.loss_fn(outputs, y)
+        predictions = torch.nn.functional.one_hot(outputs.argmax(axis=2), num_classes=self.n_classes)
+        predictions = predictions.view(predictions.size(0), -1)  # Flatten the predictions to match the output shape of the classifier
+        loss = self.loss_fn(outputs.view(outputs.size(0), -1), y)
 
         loss.backward()
 
@@ -340,12 +351,13 @@ class STGCN:
         val_metrics["scalar"] = {}
         X, y = sample
         X = X.to(device)
-        y = y.to(device)
+        y = y.to(device).view(y.size(0), -1)  # Flatten the labels to match the output shape of the classifier
         
         with torch.no_grad():
             val_out = classifier(X)
-            predictions = torch.nn.functional.one_hot(val_out.argmax(axis=1), num_classes=self.n_classes)
-            val_loss = self.loss_fn(val_out, y)
+            predictions = torch.nn.functional.one_hot(val_out.argmax(axis=2), num_classes=self.n_classes)
+            predictions = predictions.view(predictions.size(0), -1)  # Flatten the predictions to match the output shape of the classifier
+            val_loss = self.loss_fn(val_out.view(val_out.size(0),-1), y)
             val_metrics["scalar"]["val_loss"] = val_loss.item()
             for k in self.tracking_metrics.keys():
                 val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](y, predictions)
@@ -376,7 +388,7 @@ class STGCN:
         # print((t,h,w))
         # quit()
 
-        self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, dropout=DROPOUT).to(device)        
+        self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, self.time_steps, dropout=DROPOUT).to(device)        
         param_size = 0
         for param in self.classifier.parameters():
             param_size += param.nelement() * param.element_size()
@@ -496,7 +508,7 @@ class STGCN:
             print(f"Best trial config: \t {best_trial.config}")
             print(f"Best Trial Final Validation Metrics: \t {best_trial.metrics_dataframe}")
 
-            best_trained_model = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, dropout=best_trial.config["dropout"]).to(device)
+            best_trained_model = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, self.time_steps, dropout=best_trial.config["dropout"]).to(device)
 
             best_checkpoint = best_trial.get_best_checkpoint(metric="val_accuracy", mode="max")
 
@@ -565,3 +577,8 @@ class STGCN:
                 plt.xlabel("Predicted")
                 plt.ylabel("True")
                 writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)
+
+                if SAVE_MODEL is not None:
+                    if epoch % SAVE_MODEL == 0:
+                        torch.save(self.classifier.state_dict(), os.path.join("weights", "train", self.model_name, f"valloss_{scalar_metrics['val']['val_loss']}_timesteps_{self.time_steps}_classes_{self.n_classes}_model_epoch_{epoch}.pth"))
+            torch.save(self.classifier.state_dict(), os.path.join("weights", "finished", WEIGHTS_PATH))
