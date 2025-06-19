@@ -257,10 +257,16 @@ class MarcSTGCN(nn.Module):
         return self.fc(x).view(N, T, -1) # in shape: (batch, times, num_classes)
 
 class STGCN:
-    def __init__(self, ds, loss_fn=torch.nn.functional.cross_entropy, model_name=MODEL_NAME):
+    def __init__(self, ds=None, loss_fn=torch.nn.functional.cross_entropy, model_name=MODEL_NAME, weights_path=None):
         
         torch.set_default_dtype(torch.double)
         self.model_name = model_name
+
+        if weights_path is not None:
+            self.classifier = torch.load(weights_path, map_location=device )
+            print(f"Loaded model from {weights_path}")
+            return
+
         self.train_set, self.test_set, self.val_set = ds
         # print(len(self.train_set)//866)
         # quit()
@@ -306,6 +312,8 @@ class STGCN:
         # print(train_data.dtype)
         # quit()
 
+    def predict(self, sample):
+        return self.classifier(sample.to(device))
         
 
     def _train_step(self, sample, optimizer, metrics, val_sample=None, classifier=None):

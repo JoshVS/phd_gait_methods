@@ -1,3 +1,209 @@
 from classifiers.shoplifting_classifier import STGCN, BATCH_SIZE
+import cv2
+import numpy as np
+
+from ultralytics import YOLO
+import torch
 
 
+model = STGCN(weights_path="weights/train/model_checkpoints/best.pth")
+
+yolo_model = YOLO("yolov8x-pose-p6.pt")
+
+keypoints_arr = [
+            "nose",
+            "left_eye",
+            "right_eye",
+            "left_ear",
+            "right_ear",
+            "left_shoulder",
+            "right_shoulder",
+            "left_elbow",
+            "right_elbow",
+            "left_wrist",
+            "right_wrist",
+            "left_hip",
+            "right_hip",
+            "left_knee",
+            "right_knee",
+            "left_ankle",
+            "right_ankle",
+        ]
+kp_dict = {}
+for i, s in enumerate(keypoints_arr):
+    kp_dict[s] = i
+
+
+def _dim(l, check_for_error):
+    if type(l) != list and type(l) != np.ndarray:
+        return []
+    else:
+        if len(l) == 0:
+            return [0]
+        if type(l[0]) == list and check_for_error:
+            next_dim = len(l[0])
+            for mini_l in l[1:]:
+                if len(mini_l) != next_dim:
+                    raise ValueError("Array is sparse")
+        return [len(l)] + _dim(l[0], check_for_error)
+
+def dim(l, check_for_error=False):
+    return tuple(_dim(l, check_for_error))
+
+
+def annotate_frame(frame, keypoints, im_height=480, im_width=640):
+    # Keypoints is a list of lists, where each index is a keypoint
+    ann_frame = frame.copy()
+    if keypoints is None or len(keypoints) == 0:
+        return ann_frame
+
+    for keypoint in keypoints:
+        if len(keypoint) < 4:
+            continue
+        frame_idx, keypoint_name, x, y = keypoint[:4]
+        if x < 0 or y < 0:
+            continue
+        if x > ann_frame.shape[1] or y > ann_frame.shape[0]:
+            continue
+        cv2.circle(ann_frame, (int(x * im_width), int(y*im_height)), 5, (0, 255, 0), -1)
+        cv2.putText(ann_frame, keypoint_name, (int(x* im_width), int(y * im_height) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    return ann_frame
+
+
+def im2kp(frame, min_frames = 2, im_height=480, im_width=640):
+    torch.set_default_dtype(torch.float32)
+    
+    
+    # bounding_boxes = yolo_model([os.path.join(filename, f) for f in frames], save=False, verbose=False)
+    
+
+    found_frame = False
+    # print(os.path.join(filename, frame))
+    # quit()
+    curr_frame = []
+    try:
+        results_generator = yolo_model(source=frame, show=True, conf=0.3, save=False, stream=False, verbose=True, imgsz=(im_height, im_width), max_det=1000)
+        # print(len(results_generator))
+        # quit()
+    except Exception as e:
+        print(e)
+        return None
+    for i in range(2):
+        for k in kp_dict.keys():
+            curr_frame.append([i, k, 0, 0])
+
+    # print(dir(results_generator[0]))
+    # quit()
+    
+    for i, res in enumerate(results_generator):
+        if i >= 2:
+            break
+        
+        
+        
+        kpts = res.keypoints.xyn.cpu().numpy()[0, ...] # Shape (17, 2)
+        if kpts.shape[0] != 0:
+            found_frame = True  
+            for k in kp_dict.keys():
+                v = kp_dict[k]
+                curr_frame[kpts.shape[0] * i + v] = [i, k, kpts[v, 0], kpts[v, 1]]
+    
+
+        # if pose_results.pose_landmarks is not None:
+        #     found_frame = True
+        #     for k in kp_dict.keys():
+        #         v = kp_dict[k]
+        #         curr_frame.append([i, k, pose_results.pose_landmarks.landmark[v].x, pose_results.pose_landmarks.landmark[v].y, pose_results.pose_landmarks.landmark[v].z])
+                # print(dir(pose_results.pose_world_landmarks))
+                # quit()
+    if found_frame:
+        return curr_frame
+    else:
+        print("No frame found")
+        return None
+
+
+def get_available_cameras():
+    """
+    Tests camera indices to find available webcams.
+    Returns a list of indices for cameras that successfully open.
+    """
+    available_cameras = []
+    # Test indices from 0 up to a reasonable number (e.g., 10)
+    # Most systems will have cameras at 0, 1, etc.
+    for i in range(10):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            print(f"Camera found at index {i}")
+            available_cameras.append(i)
+            cap.release() # Release the camera immediately after checking
+        else:
+            # print(f"No camera at index {i}")
+            pass # Keep it quiet if no camera is found
+    return available_cameras
+
+def display_webcam_feed():
+    """
+    Captures video from the webcam and displays it in a window.
+    Press 'q' to quit the application.
+    """
+    # Open the default webcam (usually index 0)
+    # If you have multiple webcams, you might need to try different indices (1, 2, etc.)
+    # cap = cv2.VideoCapture("shoplifting.mp4")
+    
+    cap = cv2.VideoCapture(0)
+    
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+
+    # Check if the webcam was opened successfully
+    if not cap.isOpened():
+        print("Error: Could not open webcam.")
+        print("Attempting to find available cameras...")
+        cameras = get_available_cameras()
+        if cameras:
+            print(f"Found cameras at indices: {cameras}. Try setting cap = cv2.VideoCapture(index) with one of these.")
+        else:
+            print("No cameras found. Please ensure your webcam is connected and recognized by the system.")
+        return
+
+    print("Webcam feed opened successfully. Press 'q' to quit.")
+
+    frame_count = 0
+    frames = []
+    while True:
+        # Read a frame from the webcam
+        # ret (boolean): True if the frame was read successfully, False otherwise
+        # frame (numpy.ndarray): The captured frame (image)
+        ret, frame = cap.read()
+        print("Getting Keypoints")
+        keypoints = im2kp(frame)
+        print(keypoints)
+        print("Got Keypoints")
+        frame = annotate_frame(frame, keypoints)
+        print("Annotated Frame")
+        # If frame is not read correctly, ret will be False
+        if not ret:
+            print("Error: Failed to grab frame.")
+            break
+
+        # Display the captured frame in a window named 'Webcam Feed'
+        print("Displaying Frame")        
+        cv2.imshow('Webcam Feed', frame)
+
+        # Wait for 1 millisecond and check if the 'q' key is pressed
+        # If 'q' is pressed, break out of the loop
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    # Release the webcam resource
+    cap.release()
+
+    # Destroy all OpenCV windows
+    cv2.destroyAllWindows()
+    print("Webcam feed closed.")
+
+if __name__ == "__main__":
+    display_webcam_feed()
