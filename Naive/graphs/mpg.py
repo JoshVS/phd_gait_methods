@@ -4,7 +4,68 @@ Modified based on: https://github.com/open-mmlab/mmskeleton
 
 import numpy as np
 import torch
-torch.set_default_dtype(torch.double)
+torch.set_default_dtype(torch.float32)
+
+
+ul_keypoints_arr = [
+            "nose",
+            "left_eye",
+            "right_eye",
+            "left_ear",
+            "right_ear",
+            "left_shoulder",
+            "right_shoulder",
+            "left_elbow",
+            "right_elbow",
+            "left_wrist",
+            "right_wrist",
+            "left_hip",
+            "right_hip",
+            "left_knee",
+            "right_knee",
+            "left_ankle",
+            "right_ankle",
+        ]
+
+ul_kp_indices = {}
+for i, s in enumerate(ul_keypoints_arr):
+    ul_kp_indices[s] = i
+
+ul_connections = [
+            ('nose', 'left_eye'),
+            ('nose', 'right_eye'),
+            ('left_eye', 'left_ear'),
+            ('right_eye', 'right_ear'),
+            ('left_ear', 'left_shoulder'),
+            ('right_ear', 'right_shoulder'),
+            ('right_shoulder', 'left_shoulder'),
+            
+
+            ('left_shoulder', 'left_elbow'),
+            ('left_elbow', 'left_wrist'),
+
+            
+            ('right_shoulder', 'right_elbow'),
+            ('right_elbow', 'right_wrist'),
+
+            ('right_shoulder', 'right_hip'),
+            ('left_shoulder', 'left_hip'),
+            ('right_hip', 'left_hip'),
+
+            ('left_hip', 'left_knee'),
+            ('left_knee', 'left_ankle'),
+
+            
+            ('right_hip', 'right_knee'),
+            ('right_knee', 'right_ankle'),
+
+        ]
+
+ul_edge_matrix = [[ul_kp_indices[x] for x, _ in ul_connections], [ul_kp_indices[y] for _, y in ul_connections]]
+ul_in_edge = [
+    (ul_kp_indices[x], ul_kp_indices[y])
+    for (x, y) in ul_connections
+]
 
 # num_node = 59
 # self_link = [(i, i) for i in range(num_node)]
@@ -72,7 +133,7 @@ def get_spatial_graph(num_node, self_link, in_edge, out_edge):
     I = get_hop(self_link, num_node)    # For self links i.e., links between self node. Node A has link to Node A.
     In = normalize_digraph(get_hop(in_edge, num_node))  # For in_edge, i.e., links between inside edges
     Out = normalize_digraph(get_hop(out_edge, num_node))    # For out_edge, i.e., links between outside edge
-    A = np.stack((I, In, Out))
+    A = np.stack((I, In, Out), dtype=np.float32)  # Stack the three matrices together
     return A
 
 
@@ -96,4 +157,15 @@ class MediapipeGraph:
             A = get_spatial_graph(self.num_node, self.self_link, self.in_edge, self.out_edge)
         else:
             raise ValueError()
+        
         return A
+
+
+def create_ultralytics_graph():
+    
+    torch.set_default_dtype(torch.float32)
+    return MediapipeGraph(
+        num_node=17,
+        in_edge=ul_in_edge,
+        labeling_mode='spatial'
+    )

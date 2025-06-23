@@ -1,7 +1,12 @@
-from dataset_loaders.ShopLiftingDataset import ShopLiftingDataset
 from classifiers.shoplifting_classifier import STGCN, BATCH_SIZE
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
+print("ONE LAST1")
+from copy_dataset_loaders.CASIA_dataset import CASIADataset
+print("ONE LAST")
+from dataset_loaders.CopyDataset import ShopLiftingDataset
+print("ONE LAST2")
+
 
 def manual_batch(arr, batch_size=BATCH_SIZE):
     # print(arr.size())

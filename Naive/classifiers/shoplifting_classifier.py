@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from graphs.mpg import MediapipeGraph
+from graphs.mpg import MediapipeGraph, create_ultralytics_graph
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from sklearn.metrics import confusion_matrix, precision_score, recall_score, accuracy_score
@@ -43,8 +43,8 @@ SAVE_MODEL = 50
 LOAD_MODEL = False
 MODEL_NAME = "model_checkpoints"
 TUNE = False
-DROPOUT = 0.5
-WEIGHT_DECAY = 1e-3
+DROPOUT = 0.25
+WEIGHT_DECAY = 1e-4
 WEIGHTS_PATH = "shoplifting.pth"
 
 if not os.path.exists(os.path.join("weights", "train", MODEL_NAME)):
@@ -54,8 +54,8 @@ if not os.path.exists(os.path.join("weights", "train", MODEL_NAME)):
 if not os.path.exists(os.path.join("weights", "finished")):
     os.makedirs(os.path.join("weights", "finished"))
 
-L1 = 3
-L2 = 3
+L1 = 1
+L2 = 2
 L3 = 3
 
 BATCH_SIZE=16
@@ -98,7 +98,7 @@ class GraphConvolution(nn.Module):
         self.cuda_ = cuda_
         self.graph_attn = nn.Parameter(torch.from_numpy(A.astype(np.float32))) #graph_attn is the neighbourhoods - how is it represented?
         nn.init.constant_(self.graph_attn, 1)
-        self.A = Variable(torch.from_numpy(A.astype(np.float64)), requires_grad=False)
+        self.A = Variable(torch.from_numpy(A.astype(np.float32)), requires_grad=False)
 
         # Create Convolutions for each neighbourhood
         self.num_subset = 3 # number of neighbourhoods
@@ -259,11 +259,14 @@ class MarcSTGCN(nn.Module):
 class STGCN:
     def __init__(self, ds=None, loss_fn=torch.nn.functional.cross_entropy, model_name=MODEL_NAME, weights_path=None):
         
-        torch.set_default_dtype(torch.double)
+        torch.set_default_dtype(torch.float32)
         self.model_name = model_name
 
         if weights_path is not None:
-            self.classifier = torch.load(weights_path, map_location=device )
+            self.graph = create_ultralytics_graph()
+            model_weights = torch.load(weights_path, map_location=device )
+            self.classifier = MarcSTGCN(2,17, 1, 2, self.graph, 100).to(device)
+            self.classifier.load_state_dict(model_weights)
             print(f"Loaded model from {weights_path}")
             return
 
@@ -394,6 +397,9 @@ class STGCN:
         h = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[3] / 2) / 2) / 2) // 2
         w = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[4] / 2) / 2) / 2)
         # print((t,h,w))
+        # quit()
+
+        # print((self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, self.time_steps))
         # quit()
 
         self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, self.time_steps, dropout=DROPOUT).to(device)        

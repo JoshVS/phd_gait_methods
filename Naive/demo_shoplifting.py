@@ -5,8 +5,13 @@ import numpy as np
 from ultralytics import YOLO
 import torch
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
-model = STGCN(weights_path="weights/train/model_checkpoints/best.pth")
+HEADPOINT = "nose"
+CAPTURE_SOURCE = 0  # Change this to the index of your webcam or video file path
+
+
+model = STGCN(weights_path="weights/train/model_checkpoints/optimal.pth").classifier
 
 yolo_model = YOLO("yolov8x-pose-p6.pt")
 
@@ -33,6 +38,13 @@ kp_dict = {}
 for i, s in enumerate(keypoints_arr):
     kp_dict[s] = i
 
+def remove_unnecessary_info(kp):
+    # Input: shape (T, K, 3) where T is the number of frames, K is the number of keypoints, and 3 is (i, k, x, y)
+    new_kp = np.zeros((len(kp), len(kp[0]), 2), dtype=np.float32)
+    for i in range(len(kp)):
+        for j in range(len(kp[i])):
+            new_kp[i,j,:] = kp[i][j][2:]
+    return new_kp
 
 def _dim(l, check_for_error):
     if type(l) != list and type(l) != np.ndarray:
@@ -82,7 +94,7 @@ def im2kp(frame, min_frames = 2, im_height=480, im_width=640):
     # quit()
     curr_frame = []
     try:
-        results_generator = yolo_model(source=frame, show=True, conf=0.3, save=False, stream=False, verbose=True, imgsz=(im_height, im_width), max_det=1000)
+        results_generator = yolo_model.track(source=frame, show=True, conf=0.3, save=False, stream=False, verbose=True, imgsz=(im_height, im_width), max_det=1000)
         # print(len(results_generator))
         # quit()
     except Exception as e:
@@ -122,6 +134,13 @@ def im2kp(frame, min_frames = 2, im_height=480, im_width=640):
         print("No frame found")
         return None
 
+def reshape_skeletons(skeletons):
+        if len(skeletons) %17 != 0:
+            raise ValueError("Skeletons must be a multiple of 17 keypoints per person")
+        reshaped_skel = [None] * (len(skeletons) // 17)
+        for i in range(len(reshaped_skel)):
+            reshaped_skel[i] = skeletons[i*17:(i+1)*17]
+        return reshaped_skel
 
 def get_available_cameras():
     """
@@ -149,9 +168,9 @@ def display_webcam_feed():
     """
     # Open the default webcam (usually index 0)
     # If you have multiple webcams, you might need to try different indices (1, 2, etc.)
-    # cap = cv2.VideoCapture("shoplifting.mp4")
+    cap = cv2.VideoCapture(CAPTURE_SOURCE)
     
-    cap = cv2.VideoCapture(0)
+    # cap = cv2.VideoCapture(0)
     
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -173,6 +192,7 @@ def display_webcam_feed():
 
     frame_count = 0
     frames = []
+    tracking_individuals = []
     while True:
         # Read a frame from the webcam
         # ret (boolean): True if the frame was read successfully, False otherwise
@@ -180,9 +200,40 @@ def display_webcam_feed():
         ret, frame = cap.read()
         print("Getting Keypoints")
         keypoints = im2kp(frame)
-        print(keypoints)
+        if keypoints is None:
+            print("No keypoints found in the frame.")
+            
+            print("Displaying Frame")        
+            cv2.imshow('Webcam Feed', frame)
+            continue
+        keypoints = reshape_skeletons(keypoints)
+        if len(keypoints) > len(tracking_individuals):
+            tracking_individuals.extend([[]] * (len(keypoints) - len(tracking_individuals)))
+            
+        for p in range(len(keypoints)):
+            if len(tracking_individuals[p]) >= 99:
+                tracking_individuals[p] = tracking_individuals[p][-99:]
+            tracking_individuals[p].append(keypoints[p])
+        if len(tracking_individuals) > 0:
+            for i in range(len(tracking_individuals)):
+                if len(tracking_individuals[i]) == 100:
+                    X = remove_unnecessary_info(tracking_individuals[i]) # Shape (T, K, 2)
+                    C = 2
+                    T = 0
+                    K = 1
+                    X = X.transpose((C, T, K)) # Shape (2, T, K)
+                    X = X.reshape((1,) + X.shape + (1,)) # Shape (1, 2, T, K)
+                    X = torch.tensor(X, dtype=torch.float32).to(device)
+                    with torch.no_grad():
+                        pred = model(X)[0,...]
+                        means = torch.mean(pred, dim=0, keepdim=True)[0,:]
+                        if means[0] < means[1]:
+                            print(f"Shoplifting detected in individual {i} with confidence {means[0].item()}")
+                            quit()
+                    print(f"Reached 100 individuals, stopping tracking. Shape is {dim(tracking_individuals)}")
         print("Got Keypoints")
-        frame = annotate_frame(frame, keypoints)
+        for s in keypoints:
+            frame = annotate_frame(frame, s)
         print("Annotated Frame")
         # If frame is not read correctly, ret will be False
         if not ret:

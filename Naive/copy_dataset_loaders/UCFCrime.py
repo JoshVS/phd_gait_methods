@@ -32,37 +32,6 @@ WRITE_TO_CACHE = True
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def dist(a, b):
-    return np.sqrt(sum([(x - y) ** 2 for (x, y) in zip(a, b)]))
-
-def centroid(a, b):
-    return [(x + y) / 2 for (x, y) in zip(a, b)]
-
-def reframe_coords(coords, center_point, norm_dist):
-    if norm_dist == 0:
-        norm_dist = 1
-    # coords should be shape (17, 2)
-    # coords = np.array(coords)
-    # print(coords.shape)
-    # quit()
-    new_coords = []
-    for c in coords:
-        new_coords.append([(c[0] - center_point[0]) / norm_dist, (c[1] - center_point[1]) / norm_dist])
-    return np.array(new_coords, dtype=np.float32)
-
-def normalize_skeleton(skeleton):
-    # Shape should be (17,2)
-    # 5 and 6
-    l_shoulder = skeleton[5]
-    r_shoulder = skeleton[6]
-    norm_dist = dist(l_shoulder, r_shoulder)
-    center_point = centroid(l_shoulder, r_shoulder)
-    return reframe_coords(skeleton, center_point, norm_dist)
-
-
-
-
-
 
 def cell_callback_factory(num_frames):
 
@@ -169,23 +138,16 @@ def read_from_cached_file(filename, min_samples=2):
 
 
 def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=256):
+    # TODO
     
     try:
-        cv_frames = cv2.VideoCapture(filename)
-        if not cv_frames.isOpened():
-            return None
-        frames = []
-        ret, frame = cv_frames.read()
-        while ret:
-            frames.append(frame)
-            ret, frame = cv_frames.read()
+        frames = os.listdir(filename)
     except Exception as e:
         return None
     # bounding_boxes = yolo_model([os.path.join(filename, f) for f in frames], save=False, verbose=False)
     
 
     frame_results = []
-
     for  frame in frames:
         curr_frame = []
 
@@ -194,9 +156,7 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
         # print(os.path.join(filename, frame))
         # quit()
         try:
-            results_generator = yolo_model(source=frame, show=False, conf=0.3, save=False, stream=True, verbose=False)
-            # print(len(results_generator))
-            # quit()
+            results_generator = yolo_model(source=os.path.join(filename, frame), show=False, conf=0.3, save=False, stream=False, verbose=False)
         except Exception as e:
             continue
         for i in range(2):
@@ -247,9 +207,9 @@ def write_to_file(filename, kps):
     with open(filename, "w") as outfile:
         outfile.write("\n".join(lines))
 
-class ShopLiftingDataset(GenericGaitDataset):
+class UCFCrimeDataset(GenericGaitDataset):
 
-    def __init__(self, directory='../../../Datasets/ShopliftingDataset/Dataset/', max_samples=None, min_samples=5, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None):
+    def __init__(self, directory='../../../Datasets/UCFCrime/', max_samples=None, min_samples=20, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None):
         
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.val_split = val_split
@@ -274,8 +234,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
         
         
-        # self.X = self.reshape_skeletons()
-        # self.X = self.n_skel()
+        self.X = self.reshape_skeletons()
         # print(dim(self.X))
         # quit()
         
@@ -298,7 +257,6 @@ class ShopLiftingDataset(GenericGaitDataset):
         # self.scaling_vector()
         # quit()     
         # self.X, self.y = self.get_individual_steps()
-        self.stratify_y = self.y.copy()
    
         self.interpolate_by_time()
         # print(self.y)
@@ -328,14 +286,6 @@ class ShopLiftingDataset(GenericGaitDataset):
         # self.X = self.get_position_vectors()
         self.X = self.adjust_input_data(self.X)
         self.split_train_and_test()
-
-    def n_skel(self):
-        # Shape (N, 2, 351, 17, 2)
-        for i in range(len(self.X)):
-            for j in range(len(self.X[i])):
-                for k in range(len(self.X[i][j])):
-                    self.X[i][j][k] = normalize_skeleton(self.X[i][j][k])
-        return self.X
 
     def show_video(self, i, include_centroids=False, max_frames=200, outfile = "plots.gif"):
         # print(self.classes, self.video_filenames)
@@ -381,7 +331,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         camera = Camera(fig)
         
         for a in loop:
-            
+            print(a)
             # if peaks[(step_count - 1) % len(peaks)] < a < peaks[(step_count) % len(peaks)] :
             #     step_count += 1
             curr_frame = []
@@ -476,15 +426,14 @@ class ShopLiftingDataset(GenericGaitDataset):
         # quit()
 
     def convert_to_one_hot(self):
-        onehot_mat = np.zeros((self.y.shape[0], self.y.shape[1], self.n_classes))
+        onehot_mat = np.zeros((len(self.y), self.n_classes))
         # print(onehot_mat.shape)
         # print(max(self.y))
         # print(np.unique(self.y))
         # quit()
         for i in range(onehot_mat.shape[0]):
             # print(i, dim(self.y), self.y)
-            for j in range(onehot_mat.shape[1]):
-                onehot_mat[i, j, self.y[i, j]] = 1
+            onehot_mat[i, self.y[i]] = 1
         return onehot_mat
 
 
@@ -493,13 +442,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         # print(dim(self.X))
         # print([len(x) for x in self.X])
         # quit()
-        new_y = []
         for i in range(len(self.X)):
-            curr_class = self.y[i]
-            if self.classes[curr_class] == 'Normal':
-                new_y.append([curr_class] * min_frames)
-            else:
-                new_y.append(([curr_class] * (min_frames//2)) + ([abs(curr_class - 1)] * (min_frames - min_frames//2)))
             for j in range(len(self.X[i])):
                 curr_sample = self.X[i][j]
                 if len(curr_sample) == 1:
@@ -521,7 +464,6 @@ class ShopLiftingDataset(GenericGaitDataset):
                 self.X[i][j] = ynew
         if convert_to_numpy:
             self.X = np.array(self.X, dtype=np.double)
-            self.y = np.array(new_y, dtype=np.int32)
 
     def split_train_and_test(self):
         # print(dim(self.y))
@@ -688,14 +630,18 @@ class ShopLiftingDataset(GenericGaitDataset):
                 if l[1] == self.headpoint:
                     reshaped_skel[-1][l[0]].append([])
                 reshaped_skel[-1][l[0]][-1].append(l[2:])
-
-        
             
         return reshaped_skel
 
     def create_file_data(self, kp_dict, max_samples, max_classes):
-        if not os.path.exists(os.path.join(self.directory, f"cached/")):
-            os.makedirs(os.path.join(self.directory, "cached/"))
+        cache_directory = os.path.join(self.directory,"cached/")
+        if not os.path.exists(cache_directory):
+            os.makedirs(cache_directory)
+        video_list_file = os.path.join(self.directory, "anomaly_train.txt")
+        with open(video_list_file, 'r') as f:
+            list_of_videos = [x.strip() for x in f.readlines()]
+        annotation_file = os.path.join(self.directory, "anomaly_train_label.txt")
+        
         # subdirs = os.listdir(self.directory)
         # classes = []
         # videos = []
@@ -726,7 +672,6 @@ class ShopLiftingDataset(GenericGaitDataset):
         z_data = []
         vid_filenames = []
         classe_names = os.listdir(self.directory)
-        classe_names.remove("cached")
         if self.exclude_classes is not None:
             tmp = {}
             for i, c in enumerate(classe_names):
@@ -774,8 +719,8 @@ class ShopLiftingDataset(GenericGaitDataset):
             class_vid_filenames = []
 
             loop = tqdm(vids)
-            if not os.path.exists(os.path.join(self.directory, "cached/")):
-                os.makedirs(os.path.join(self.directory, "cached/"))
+            if not os.path.exists(cache_directory):
+                os.makedirs(cache_directory)
             num_samples = 0
             tmp_z = []
             tmp_vids = []
@@ -783,9 +728,9 @@ class ShopLiftingDataset(GenericGaitDataset):
             tmp_classes = []
 
             for i, vid in enumerate(loop):
-                if os.path.exists(os.path.join(self.directory, "cached/", f"{vid}.txt")) and READ_FROM_CACHE:
+                if os.path.exists(f"{cache_directory}/{vid}.txt") and READ_FROM_CACHE:
                     # to_append, z_datum = read_from_cached_file(f"cached/{vid}.txt")
-                    ret_val = read_from_cached_file(os.path.join(self.directory, "cached/", f"{vid}.txt"))
+                    ret_val = read_from_cached_file(f"{cache_directory}/{vid}.txt")
                     
                     # if ret_val is None:
                     #     continue
@@ -794,7 +739,6 @@ class ShopLiftingDataset(GenericGaitDataset):
                     # to_append = np.concatenate((to_append, z_datum), axis=1)
                   
                     # quit()
-                    # print(ret_val)
                     if ret_val is not None:
                         num_samples += 1
                         to_append= ret_val
@@ -803,7 +747,7 @@ class ShopLiftingDataset(GenericGaitDataset):
                         tmp_vid_filenames.append(os.path.join(self.directory,class_name, vid))
                         tmp_classes.append(class_idx)
                 else:
-                    print(f"[{class_idx + 1} / {len(classe_names)}]File cached/{vid}.txt doesn't exist, creating")
+                    print(f"[{class_idx + 1} / {len(classe_names)}]File {cache_directory}/{vid}.txt doesn't exist, creating")
                     filename = os.path.join(self.directory, class_name, vid)
                     c = get_kp_from_file(filename, kp_dict)
                     # print(c)
@@ -813,12 +757,12 @@ class ShopLiftingDataset(GenericGaitDataset):
                         tmp_vids.append(c)
                         tmp_vid_filenames.append(filename)
                         if WRITE_TO_CACHE:
-                            write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), c)
+                            write_to_file(f"{cache_directory}/{vid}.txt", c)
                         tmp_classes.append(class_idx)
                     else:
                         # pass
                         if WRITE_TO_CACHE:
-                            write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), "")
+                            write_to_file(f"{cache_directory}/{vid}.txt", "")
                 
                 if num_samples == maximum_num_samples:
                     print("Reached Maximum Samples")
@@ -841,7 +785,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         j = 0
         while(i < len(classe_names)):
             if classes.count(j) == 0:
-                print(f"Popping {classe_names[i]} (Class {i})")
+                print(f"Popping {i}")
                 classe_names.pop(i)
                 j += 1
             else:
@@ -1091,7 +1035,5 @@ class ShopLiftingDataset(GenericGaitDataset):
         # print(X.shape)
         # quit()
         X = X.transpose(N, C, T, V, M)
-        if X.shape[-1] > 1:
-            X = X[..., :1]
         # print(X.shape)
-        return torch.tensor(X, dtype=torch.float32)
+        return torch.tensor(X, dtype=torch.double)
