@@ -6,28 +6,92 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from .genericdataset import GenericGaitDataset
-import seaborn as sns
 import matplotlib.pyplot as plt
-import plotly.express as px
 from ultralytics import YOLO
 import torch
 from scipy.interpolate import interp1d
 # matplotlib.use('TkAgg')
 np.seterr(all='raise')
 
-from sklearn.ensemble import RandomForestClassifier
 from celluloid import Camera
 
 torch.set_default_dtype(torch.float32)
 yolo_model = YOLO("yolov8x-pose-p6.pt")
 
-hog = cv2.HOGDescriptor()
-hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-
 READ_FROM_CACHE = True
 WRITE_TO_CACHE = True
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Thanks Gemini
+def make_keypoints_rotation_invariant(keypoints, shoulder_indices=(5, 6), reference_point_index=0):
+    """
+    Makes a set of 2D keypoints rotation-invariant.
+
+    This function normalizes the rotation of a pose by aligning a reference bone
+    (e.g., shoulders) with the horizontal axis. It then translates the pose
+    so a specific reference point (e.g., nose) is at the origin.
+
+    Args:
+        keypoints (list or np.array): A Python list of lists or a NumPy array of shape (N, 2)
+                                      where N is the number of keypoints, and each inner list/row
+                                      is an (x, y) coordinate. Ultralytics models typically output
+                                      (x, y, confidence) so ensure you pass only the (x, y) part.
+        shoulder_indices (tuple): A tuple (left_shoulder_index, right_shoulder_index)
+                                  representing the indices of the shoulder keypoints
+                                  in the `keypoints` array. Default assumes COCO format
+                                  where 5 is left shoulder and 6 is right shoulder.
+        reference_point_index (int): The index of the keypoint to use as the
+                                     translation reference (e.g., nose). This
+                                     point will be moved to (0,0) after rotation.
+                                     Default assumes COCO format where 0 is nose.
+
+    Returns:
+        np.array: A NumPy array of shape (N, 2) with rotation-invariant keypoints.
+                  The keypoints are rotated and translated.
+    """
+    # Convert input list to NumPy array if it's not already one
+    if not isinstance(keypoints, np.ndarray):
+        keypoints = np.array(keypoints, dtype=float)
+
+    if keypoints.shape[0] < max(shoulder_indices) + 1:
+        print("Warning: Not enough keypoints for specified shoulder indices.")
+        # Return original keypoints if reference points are missing
+        return keypoints
+
+    # Extract shoulder keypoints
+    left_shoulder = keypoints[shoulder_indices[0]]
+    right_shoulder = keypoints[shoulder_indices[1]]
+
+    # Calculate the vector from left to right shoulder
+    shoulder_vector = right_shoulder - left_shoulder
+
+    # Calculate the angle of the shoulder vector with the positive x-axis
+    # atan2 gives the angle in radians, handling all quadrants
+    angle_rad = np.arctan2(shoulder_vector[1], shoulder_vector[0])
+
+    # Create a 2D rotation matrix for rotation by -angle_rad
+    # This rotates the pose so the shoulder line becomes horizontal
+    cos_val = np.cos(-angle_rad)
+    sin_val = np.sin(-angle_rad)
+    rotation_matrix = np.array([
+        [cos_val, -sin_val],
+        [sin_val, cos_val]
+    ])
+
+    # Translate all keypoints so the left shoulder is at the origin before rotation
+    # This ensures rotation happens around a point related to the pose itself
+    translated_keypoints = keypoints - left_shoulder
+
+    # Apply the rotation to all keypoints
+    rotated_keypoints = np.dot(translated_keypoints, rotation_matrix.T)
+
+    # Now, translate the rotated keypoints so the chosen reference point (e.g., nose)
+    # is at the origin (0,0). This makes the pose translation-invariant.
+    translation_vector = rotated_keypoints[reference_point_index]
+    rotation_invariant_keypoints = rotated_keypoints - translation_vector
+
+    return rotation_invariant_keypoints
 
 def dist(a, b):
     return np.sqrt(sum([(x - y) ** 2 for (x, y) in zip(a, b)]))
@@ -50,12 +114,7 @@ def reframe_coords(coords, center_point, norm_dist):
 def normalize_skeleton(skeleton):
     # Shape should be (17,2)
     # 5 and 6
-    l_shoulder = skeleton[5]
-    r_shoulder = skeleton[6]
-    norm_dist = dist(l_shoulder, r_shoulder)
-    center_point = centroid(l_shoulder, r_shoulder)
-    return reframe_coords(skeleton, center_point, norm_dist)
-
+    return make_keypoints_rotation_invariant(skeleton, shoulder_indices=(5, 6), reference_point_index=0)
 
 
 
@@ -207,10 +266,15 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
             kpts = res.keypoints.xyn.cpu().numpy()[0, ...] # Shape (17, 2)
             if kpts.shape[0] != 0:
                 found_frame = True  
+                
+                bbox = res.boxes.xywh.cpu().numpy()[0,...]
+                xA, yA, w, h = bbox
                 for k in kp_dict.keys():
                     v = kp_dict[k]
-                    curr_frame[kpts.shape[0] * i + v] = [i, k, kpts[v, 0], kpts[v, 1]]
-        
+                    curr_frame[kpts.shape[0] * i + v] = [i, 
+                                                         k, 
+                                                         (kpts[v, 0] - xA) / w, 
+                                                         (kpts[v, 1] - yA) / h]
 
             # if pose_results.pose_landmarks is not None:
             #     found_frame = True
