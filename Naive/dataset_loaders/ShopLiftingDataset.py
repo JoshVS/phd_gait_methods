@@ -18,9 +18,6 @@ np.seterr(all='raise')
 from sklearn.ensemble import RandomForestClassifier
 from celluloid import Camera
 
-import mediapipe as mp
-mp_pose = mp.solutions.pose
-pose = mp_pose.Pose(min_detection_confidence=0.4, min_tracking_confidence=0.4, smooth_landmarks=True)
 torch.set_default_dtype(torch.float32)
 yolo_model = YOLO("yolov8x-pose-p6.pt")
 
@@ -273,9 +270,9 @@ class ShopLiftingDataset(GenericGaitDataset):
 
         self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
         
-        
-        # self.X = self.reshape_skeletons()
-        # self.X = self.n_skel()
+        print("RESHAPING AND NORMALIZING SKELETONS")
+        self.X = self.reshape_skeletons()
+        self.X = self.n_skel()
         # print(dim(self.X))
         # quit()
         
@@ -297,9 +294,9 @@ class ShopLiftingDataset(GenericGaitDataset):
         # self.translation_vector()
         # self.scaling_vector()
         # quit()     
-        # self.X, self.y = self.get_individual_steps()
+        print("INTERPOLATING BY TIME")
         self.stratify_y = self.y.copy()
-   
+
         self.interpolate_by_time()
         # print(self.y)
         # quit()
@@ -328,6 +325,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         # self.X = self.get_position_vectors()
         self.X = self.adjust_input_data(self.X)
         self.split_train_and_test()
+        print("ALL FINISHED")
 
     def n_skel(self):
         # Shape (N, 2, 351, 17, 2)

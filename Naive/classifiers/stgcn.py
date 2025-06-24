@@ -49,7 +49,7 @@ WEIGHT_DECAY = 1e-2
 BATCH_SIZE=32
 
 EPOCHS = 1000
-LR = 1e-3
+LR = 1e-5
 
 def force_cudnn_initialization():
     if device == "cuda":
@@ -185,7 +185,7 @@ class ST_GCN_block(nn.Module):
 
 
 class MarcSTGCN(nn.Module):
-    def __init__(self, num_class, num_point, num_person, in_channels, graph, cuda_=torch.cuda.is_available(), l1=1, l2=1, l3=1, dropout=DROPOUT):
+    def __init__(self, num_class, num_point, num_person, in_channels, graph, cuda_=torch.cuda.is_available(), l1=3, l2=3, l3=3, dropout=DROPOUT):
         super(MarcSTGCN, self).__init__()
 
         self.graph = graph
