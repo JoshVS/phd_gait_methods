@@ -77,7 +77,6 @@ my_ds = ShopLiftingDataset(generate_test_video=None,
 
 TEST_SIZE = 0.1
 VAL_SIZE = 0.3
-
 X_train, X_test, y_train, y_test = train_test_split(my_ds.X, my_ds.y, test_size=TEST_SIZE, shuffle=True, stratify=my_ds.stratify_y)
 X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=VAL_SIZE, shuffle=True, stratify=y_train[:,-1,:])
 train = TrainValDataset(my_ds, X_train, y_train)

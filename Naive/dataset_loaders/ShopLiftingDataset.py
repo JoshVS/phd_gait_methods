@@ -360,9 +360,9 @@ class ShopLiftingDataset(GenericGaitDataset):
         # self.scaling_vector()
         # quit()     
         print("INTERPOLATING BY TIME")
-        self.stratify_y = self.y.copy()
 
         self.interpolate_by_time()
+        self.stratify_y = self.y.copy()
         # print(self.y)
         # quit()
         # sns.histplot(np.array(self.y), x=self.classes)
@@ -389,7 +389,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         # self.y = self.to_one_hot()
         # self.X = self.get_position_vectors()
         self.X = self.adjust_input_data(self.X)
-        self.split_train_and_test()
+        # self.split_train_and_test()
         print("ALL FINISHED")
 
     def n_skel(self):
@@ -555,34 +555,40 @@ class ShopLiftingDataset(GenericGaitDataset):
         # print(dim(self.X))
         # print([len(x) for x in self.X])
         # quit()
+        new_x = []
         new_y = []
         for i in range(len(self.X)):
             curr_class = self.y[i]
+            curr_vid_len = len(self.X[i][0])
             if self.classes[curr_class] == 'Normal':
-                new_y.append([curr_class] * min_frames)
+                curr_y = [curr_class] * curr_vid_len
             else:
-                new_y.append(([curr_class] * (min_frames//2)) + ([abs(curr_class - 1)] * (min_frames - min_frames//2)))
-            for j in range(len(self.X[i])):
-                curr_sample = self.X[i][j]
-                if len(curr_sample) == 1:
-                    self.X[i][j] = self.X[i][j] * min_frames
-                    continue
-                x = np.arange(len(curr_sample))
-                # print(len(curr_sample), i, len(self.X))
-                # print(dim(curr_sample), i, j)
-                # quit()
-                f = interp1d(x, curr_sample, axis=0)
-                xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
-                # print(xnew, len(curr_sample))
-                # quit()
-                # y_old = f(x)
-                # print(xnew, len(curr_sample))
-                # quit()
-                # print(len(curr_sample))
-                ynew = f(xnew)
-                self.X[i][j] = ynew
+                curr_y = ([curr_class] * (curr_vid_len//2)) + ([abs(curr_class - 1)] * (curr_vid_len - curr_vid_len//2))
+            
+            for k in range(curr_vid_len - min_frames):
+                new_x.append(self.X[i][0][k:k + min_frames])
+                new_y.append(curr_y[k:k + min_frames])
+
+                # curr_sample = self.X[i][j]
+                # if len(curr_sample) == 1:
+                #     self.X[i][j] = self.X[i][j] * min_frames
+                #     continue
+                # x = np.arange(len(curr_sample))
+                # # print(len(curr_sample), i, len(self.X))
+                # # print(dim(curr_sample), i, j)
+                # # quit()
+                # f = interp1d(x, curr_sample, axis=0)
+                # xnew = np.linspace(0, len(curr_sample) - 1, min_frames)
+                # # print(xnew, len(curr_sample))
+                # # quit()
+                # # y_old = f(x)
+                # # print(xnew, len(curr_sample))
+                # # quit()
+                # # print(len(curr_sample))
+                # ynew = f(xnew)
+                # self.X[i][j] = ynew
         if convert_to_numpy:
-            self.X = np.array(self.X, dtype=np.double)
+            self.X = np.array(new_x, dtype=np.double)
             self.y = np.array(new_y, dtype=np.int32)
 
     def split_train_and_test(self):
@@ -1152,7 +1158,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         M = 1
         # print(X.shape)
         # quit()
-        X = X.transpose(N, C, T, V, M)
+        X = X.reshape((X.shape[0],) + (1,) + X.shape[1:]).transpose(N, C, T, V, M)
         if X.shape[-1] > 1:
             X = X[..., :1]
         # print(X.shape)
