@@ -43,8 +43,8 @@ SAVE_MODEL = 50
 LOAD_MODEL = False
 MODEL_NAME = "model_checkpoints"
 TUNE = False
-DROPOUT = 0.25
-WEIGHT_DECAY = 1e-4
+DROPOUT = 0.8
+WEIGHT_DECAY = 1e-2
 WEIGHTS_PATH = "shoplifting.pth"
 
 if not os.path.exists(os.path.join("weights", "train", MODEL_NAME)):
@@ -54,14 +54,14 @@ if not os.path.exists(os.path.join("weights", "train", MODEL_NAME)):
 if not os.path.exists(os.path.join("weights", "finished")):
     os.makedirs(os.path.join("weights", "finished"))
 
-L1 = 1
-L2 = 2
+L1 = 3
+L2 = 3
 L3 = 3
 
-BATCH_SIZE=16
+BATCH_SIZE=64
 
-EPOCHS = 1000
-LR = 1e-3
+EPOCHS = 100
+LR = 1e-4
 
 def force_cudnn_initialization():
     if device == "cuda":
@@ -308,8 +308,8 @@ class STGCN:
             # "precision": Precision("multiclass", average="macro", num_classes=self.n_classes).to(device),
             # "recall": Recall("multiclass", average="macro", num_classes=self.n_classes).to(device)
             "accuracy": lambda x, y: accuracy_score(x.cpu().numpy(), y.cpu().numpy()),
-            "precision": lambda x, y: precision_score(x.cpu().numpy(), y.cpu().numpy(), average="macro", zero_division=0.0),
-            "recall": lambda x, y: recall_score(x.cpu().numpy(), y.cpu().numpy(), average="macro", zero_division=0.0)
+            "precision": lambda x, y: precision_score(x.cpu().numpy(), y.cpu().numpy(), average="macro", zero_division=1.0),
+            "recall": lambda x, y: recall_score(x.cpu().numpy(), y.cpu().numpy(), average="macro", zero_division=1.0)
         }
         self.train()
         # print(train_data.dtype)
@@ -323,18 +323,17 @@ class STGCN:
         if classifier is None:
             classifier = self.classifier
         metrics["scalar"] = {}
-        if val_sample is not None:
-            val_metrics = {}
-        val_metrics = {}
         X, y = sample
         X = X.to(device)
-        y = y.to(device).view(y.size(0), -1)  # Flatten the labels to match the output shape of the classifier
+        y = y.to(device).view(-1, self.n_classes)  # Flatten the labels to match the output shape of the classifier
         # print(y.size())
         optimizer.zero_grad()
-        outputs = classifier(X)
-        predictions = torch.nn.functional.one_hot(outputs.argmax(axis=2), num_classes=self.n_classes)
-        predictions = predictions.view(predictions.size(0), -1)  # Flatten the predictions to match the output shape of the classifier
-        loss = self.loss_fn(outputs.view(outputs.size(0), -1), y)
+        outputs = classifier(X).float()
+        outputs = outputs.view(-1, self.n_classes)  # Flatten the outputs to match the output shape of the classifier
+        predictions = outputs.argmax(axis=1)
+        true_labels = y.argmax(axis=1)
+        # predictions = predictions.view(-1, predictions.size(2))  # Flatten the predictions to match the output shape of the classifier
+        loss = self.loss_fn(outputs, y)
 
         loss.backward()
 
@@ -342,10 +341,10 @@ class STGCN:
         metrics["scalar"]['loss'] = loss.item()
         with torch.no_grad():
             for k in self.tracking_metrics.keys():
-                metrics["scalar"][k] = self.tracking_metrics[k](y, predictions)
+                metrics["scalar"][k] = self.tracking_metrics[k](true_labels, predictions)
             # print(y.cpu().numpy().argmax(axis=1).shape, predictions.cpu().numpy().argmax(axis=1).shape)
             # quit()
-            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
+            cm = confusion_matrix(true_labels.cpu().numpy(), predictions.cpu().numpy(), labels = np.array(list(range(self.n_classes))))
             if "conf_mat" not in metrics["image"].keys():
                 # print(cm.shape)
                 metrics["image"]["conf_mat"] = cm
@@ -362,18 +361,19 @@ class STGCN:
         val_metrics["scalar"] = {}
         X, y = sample
         X = X.to(device)
-        y = y.to(device).view(y.size(0), -1)  # Flatten the labels to match the output shape of the classifier
+        y = y.to(device).view(-1, self.n_classes)  # Flatten the labels to match the output shape of the classifier
         
         with torch.no_grad():
-            val_out = classifier(X)
-            predictions = torch.nn.functional.one_hot(val_out.argmax(axis=2), num_classes=self.n_classes)
-            predictions = predictions.view(predictions.size(0), -1)  # Flatten the predictions to match the output shape of the classifier
-            val_loss = self.loss_fn(val_out.view(val_out.size(0),-1), y)
+            val_out = classifier(X).view(-1, self.n_classes).float()
+            predictions = val_out.argmax(axis=1)
+            true_labels = y.argmax(axis=1)
+            # predictions = predictions.view(-1, predictions.size(2))  # Flatten the predictions to match the output shape of the classifier
+            val_loss = self.loss_fn(val_out, y)
             val_metrics["scalar"]["val_loss"] = val_loss.item()
             for k in self.tracking_metrics.keys():
-                val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](y, predictions)
+                val_metrics["scalar"]["val_" + k] = self.tracking_metrics[k](true_labels, predictions)
 
-            cm = confusion_matrix(y.cpu().numpy().argmax(axis=1), predictions.cpu().numpy().argmax(axis=1), labels = np.array(list(range(self.n_classes))))
+            cm = confusion_matrix(true_labels.cpu().numpy(), predictions.cpu().numpy(), labels = np.array(list(range(self.n_classes))))
             if "val_conf_mat" not in val_metrics["image"]:
                 # print(cm.shape)
                 val_metrics["image"]["val_conf_mat"]  = cm
@@ -580,14 +580,14 @@ class STGCN:
                     # train.report(scalar_metrics["train"])
                     loop.set_postfix(train_metrics["scalar"])
                 writer.add_scalars("Training", scalar_metrics["train"], epoch)
-                sns.heatmap(train_metrics["image"]["conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
+                sns.heatmap(train_metrics["image"]["conf_mat"], annot=True, xticklabels=self.class_names, yticklabels=self.class_names)
                 plt.xlabel("Predicted")
                 plt.ylabel("True")
                 writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
                 plt.close()
 
                 
-                sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
+                sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=True, xticklabels=self.class_names, yticklabels=self.class_names)
                 plt.xlabel("Predicted")
                 plt.ylabel("True")
                 writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)
