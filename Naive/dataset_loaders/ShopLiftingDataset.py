@@ -263,7 +263,7 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
             if i >= 2:
                 break
             
-            kpts = res.keypoints.xyn.cpu().numpy()[0, ...] # Shape (17, 2)
+            kpts = res.keypoints.xy.cpu().numpy()[0, ...] # Shape (17, 2)
             if kpts.shape[0] != 0:
                 found_frame = True  
                 
@@ -274,7 +274,8 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
                     curr_frame[kpts.shape[0] * i + v] = [i, 
                                                          k, 
                                                          (kpts[v, 0] - xA) / w, 
-                                                         (kpts[v, 1] - yA) / h]
+                                                         (yA - kpts[v, 1]) / h]
+                    # quit()
 
             # if pose_results.pose_landmarks is not None:
             #     found_frame = True
@@ -420,7 +421,6 @@ class ShopLiftingDataset(GenericGaitDataset):
         i = abs(i)
         print()
         print("Generating Video...")
-        loop = tqdm(range(len(self.X[i][:(-1 if len(self.X[i]) < max_frames else max_frames)])))
         # print(dim(loop))
         # quit()
 
@@ -431,25 +431,28 @@ class ShopLiftingDataset(GenericGaitDataset):
         fig, ax = plt.subplots(3)
         # ax = fig.add_subplot()
         # ankle_ax = fig.add_subplot()
-        cap = [os.path.join(self.video_filenames[i], f) for f in os.listdir(self.video_filenames[i])]
+        cap = self.video_filenames[i]#[os.path.join(self.video_filenames[i], f) for f in os.listdir(self.video_filenames[i])]
         # print(cap)
         # quit()
-        if len(cap) == 0:
-            print(f"Error opening file {self.video_filenames[i]}")
-            quit()
         frames = []
         ax, vid_ax, vid_scat_ax = ax[0], ax[1], ax[2]
         ax.invert_yaxis()
         camera = Camera(fig)
-        
-        for a in loop:
-            
+
+        frames = cv2.VideoCapture(cap)
+        a = 0 
+        while True:
+
+            ret, frame = frames.read()
+            if not ret:
+                break
             # if peaks[(step_count - 1) % len(peaks)] < a < peaks[(step_count) % len(peaks)] :
             #     step_count += 1
             curr_frame = []
             # print(dim(self.X[i]))
             # quit()
-            kps = self.X[i][a]
+            kps = self.X[i][0][a]
+            
             # ax.legend([f"Step Count: {step_count}"], loc='upper left')
             # ankle_ax.plot(ankles[:a])
             
@@ -488,9 +491,6 @@ class ShopLiftingDataset(GenericGaitDataset):
             # quit()
             # quit()
             # ret, frame = cap.read()
-            print(cap[a])
-            # quit()
-            frame = cv2.imread(cap[a])
             # print(frame)
             # quit()
             # cv2.imshow(frame)
@@ -524,7 +524,7 @@ class ShopLiftingDataset(GenericGaitDataset):
             # vid_scat_ax.scatter([c[0] * im.shape[0] for c in coords[1:]], [c[1] * im.shape[1] for c in coords[1:]], c='b')
             vid_scat_ax.imshow(im)
             camera.snap()
-            loop.set_postfix()
+            a += 1
         # fig.savefig("3d.png")
         print("Rendering Video")
         # ani = animation.ArtistAnimation(fig, frames, interval=50)
@@ -533,7 +533,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         if not os.path.exists("gifs"):
             os.makedirs("gifs")
         path_out = os.path.join("gifs", outfile)
-        animation.save(path_out, writer='imagemagick', progress_callback=cell_callback_factory(len(self.X[i][:(-1 if len(self.X[i]) < max_frames else max_frames)])))
+        animation.save(path_out, writer='imagemagick', progress_callback=cell_callback_factory(len(self.X[i][0][:(-1 if len(self.X[i]) < max_frames else max_frames)])))
         # ani.save('movie.mp4')
         # quit()
 
