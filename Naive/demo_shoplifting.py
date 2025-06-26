@@ -8,10 +8,12 @@ import torch
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 HEADPOINT = "nose"
-CAPTURE_SOURCE = 0  # Change this to the index of your webcam or video file path
+CAPTURE_SOURCE = 0#"test.mp4"  # Change this to the index of your webcam or video file path
+MODEL_LOAD_PATH = "weights/finished/shoplifting.pth"
+SHOW_KEYPOINTS = False  # Set to False to disable keypoint visualization
 
 
-model = STGCN(weights_path="weights/train/model_checkpoints/optimal.pth").classifier
+model = STGCN(weights_path=MODEL_LOAD_PATH).classifier
 
 yolo_model = YOLO("yolov8x-pose-p6.pt")
 
@@ -34,9 +36,117 @@ keypoints_arr = [
             "left_ankle",
             "right_ankle",
         ]
+
+connections = [
+            ('nose', 'left_eye'),
+            ('nose', 'right_eye'),
+            ('left_eye', 'left_ear'),
+            ('right_eye', 'right_ear'),
+            ('left_ear', 'left_shoulder'),
+            ('right_ear', 'right_shoulder'),
+            ('right_shoulder', 'left_shoulder'),
+            
+
+            ('left_shoulder', 'left_elbow'),
+            ('left_elbow', 'left_wrist'),
+
+            
+            ('right_shoulder', 'right_elbow'),
+            ('right_elbow', 'right_wrist'),
+
+            ('right_shoulder', 'right_hip'),
+            ('left_shoulder', 'left_hip'),
+            ('right_hip', 'left_hip'),
+
+            ('left_hip', 'left_knee'),
+            ('left_knee', 'left_ankle'),
+
+            
+            ('right_hip', 'right_knee'),
+            ('right_knee', 'right_ankle'),
+
+        ]
 kp_dict = {}
 for i, s in enumerate(keypoints_arr):
     kp_dict[s] = i
+
+# Thanks Gemini
+def make_keypoints_rotation_invariant(keypoints, shoulder_indices=(5, 6), reference_point_index=0):
+    """
+    Makes a set of 2D keypoints rotation-invariant.
+
+    This function normalizes the rotation of a pose by aligning a reference bone
+    (e.g., shoulders) with the horizontal axis. It then translates the pose
+    so a specific reference point (e.g., nose) is at the origin.
+
+    Args:
+        keypoints (list or np.array): A Python list of lists or a NumPy array of shape (N, 2)
+                                      where N is the number of keypoints, and each inner list/row
+                                      is an (x, y) coordinate. Ultralytics models typically output
+                                      (x, y, confidence) so ensure you pass only the (x, y) part.
+        shoulder_indices (tuple): A tuple (left_shoulder_index, right_shoulder_index)
+                                  representing the indices of the shoulder keypoints
+                                  in the `keypoints` array. Default assumes COCO format
+                                  where 5 is left shoulder and 6 is right shoulder.
+        reference_point_index (int): The index of the keypoint to use as the
+                                     translation reference (e.g., nose). This
+                                     point will be moved to (0,0) after rotation.
+                                     Default assumes COCO format where 0 is nose.
+
+    Returns:
+        np.array: A NumPy array of shape (N, 2) with rotation-invariant keypoints.
+                  The keypoints are rotated and translated.
+    """
+    # Convert input list to NumPy array if it's not already one
+    if not isinstance(keypoints, np.ndarray):
+        keypoints = np.array(keypoints, dtype=float)
+
+    if keypoints.shape[0] < max(shoulder_indices) + 1:
+        print("Warning: Not enough keypoints for specified shoulder indices.")
+        # Return original keypoints if reference points are missing
+        return keypoints
+
+    # Extract shoulder keypoints
+    left_shoulder = keypoints[shoulder_indices[0]]
+    right_shoulder = keypoints[shoulder_indices[1]]
+
+    # Calculate the vector from left to right shoulder
+    shoulder_vector = right_shoulder - left_shoulder
+
+    # Calculate the angle of the shoulder vector with the positive x-axis
+    # atan2 gives the angle in radians, handling all quadrants
+    angle_rad = np.arctan2(shoulder_vector[1], shoulder_vector[0])
+
+    # Create a 2D rotation matrix for rotation by -angle_rad
+    # This rotates the pose so the shoulder line becomes horizontal
+    cos_val = np.cos(-angle_rad)
+    sin_val = np.sin(-angle_rad)
+    rotation_matrix = np.array([
+        [cos_val, -sin_val],
+        [sin_val, cos_val]
+    ])
+
+    # Translate all keypoints so the left shoulder is at the origin before rotation
+    # This ensures rotation happens around a point related to the pose itself
+    translated_keypoints = keypoints - left_shoulder
+
+    # Apply the rotation to all keypoints
+    rotated_keypoints = np.dot(translated_keypoints, rotation_matrix.T)
+
+    # Now, translate the rotated keypoints so the chosen reference point (e.g., nose)
+    # is at the origin (0,0). This makes the pose translation-invariant.
+    translation_vector = rotated_keypoints[reference_point_index]
+    rotation_invariant_keypoints = rotated_keypoints - translation_vector
+
+    return rotation_invariant_keypoints
+
+
+def normalize_keypoints(keypoints, im_height=480, im_width=640):
+    norm_kp = []
+    for i in range(len(keypoints)):
+        norm_kp.append(make_keypoints_rotation_invariant(keypoints[i]))
+    return norm_kp
+
 
 def remove_unnecessary_info(kp):
     # Input: shape (T, K, 3) where T is the number of frames, K is the number of keypoints, and 3 is (i, k, x, y)
@@ -65,24 +175,31 @@ def dim(l, check_for_error=False):
 
 def annotate_frame(frame, keypoints, im_height=480, im_width=640):
     # Keypoints is a list of lists, where each index is a keypoint
+    x_ind = 0 if len(keypoints[0]) < 4 else 2
+    y_ind = 1 if len(keypoints[0]) < 4 else 3
     ann_frame = frame.copy()
     if keypoints is None or len(keypoints) == 0:
         return ann_frame
 
     for keypoint in keypoints:
-        if len(keypoint) < 4:
-            continue
-        frame_idx, keypoint_name, x, y = keypoint[:4]
+        x, y = keypoint[x_ind], keypoint[y_ind]
         if x < 0 or y < 0:
             continue
         if x > ann_frame.shape[1] or y > ann_frame.shape[0]:
             continue
         cv2.circle(ann_frame, (int(x * im_width), int(y*im_height)), 5, (0, 255, 0), -1)
-        cv2.putText(ann_frame, keypoint_name, (int(x* im_width), int(y * im_height) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        if x_ind != 0:
+            cv2.putText(ann_frame, keypoint[1], (int(x* im_width), int(y * im_height) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    for conn in connections:
+        start_kp, end_kp = kp_dict[conn[0]], kp_dict[conn[1]]
+        cv2.line(ann_frame, 
+                 (int(keypoints[start_kp][x_ind] * im_width), int(keypoints[start_kp][y_ind] * im_height)),
+                 (int(keypoints[end_kp][x_ind] * im_width), int(keypoints[end_kp][y_ind] * im_height)),
+                 (255, 0, 0), 2)
     return ann_frame
 
 
-def im2kp(frame, min_frames = 2, im_height=480, im_width=640):
+def im2kp(frame, min_frames = 2, im_height=512, im_width=640):
     torch.set_default_dtype(torch.float32)
     
     
@@ -113,12 +230,17 @@ def im2kp(frame, min_frames = 2, im_height=480, im_width=640):
         
         
         
-        kpts = res.keypoints.xyn.cpu().numpy()[0, ...] # Shape (17, 2)
+        kpts = res.keypoints.xy.cpu().numpy()[0, ...] # Shape (17, 2)
         if kpts.shape[0] != 0:
             found_frame = True  
+            bbox = res.boxes.xywh.cpu().numpy()[0, ...] # Shape (4,)
+            xA, yA, w, h = bbox
             for k in kp_dict.keys():
                 v = kp_dict[k]
-                curr_frame[kpts.shape[0] * i + v] = [i, k, kpts[v, 0], kpts[v, 1]]
+                curr_frame[kpts.shape[0] * i + v] = [i,
+                                                      k, 
+                                                      (kpts[v, 0] - xA) / w, 
+                                                      (yA - kpts[v, 1]) / h]
     
 
         # if pose_results.pose_landmarks is not None:
@@ -141,6 +263,8 @@ def reshape_skeletons(skeletons):
         for i in range(len(reshaped_skel)):
             reshaped_skel[i] = skeletons[i*17:(i+1)*17]
         return reshaped_skel
+
+
 
 def get_available_cameras():
     """
@@ -173,8 +297,8 @@ def display_webcam_feed():
     # cap = cv2.VideoCapture(0)
     
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1000)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1000)
 
 
     # Check if the webcam was opened successfully
@@ -198,6 +322,9 @@ def display_webcam_feed():
         # ret (boolean): True if the frame was read successfully, False otherwise
         # frame (numpy.ndarray): The captured frame (image)
         ret, frame = cap.read()
+        if not ret:
+            print("Video Finished")
+            break
         print("Getting Keypoints")
         keypoints = im2kp(frame)
         if keypoints is None:
@@ -218,6 +345,10 @@ def display_webcam_feed():
             for i in range(len(tracking_individuals)):
                 if len(tracking_individuals[i]) == 100:
                     X = remove_unnecessary_info(tracking_individuals[i]) # Shape (T, K, 2)
+                    X = normalize_keypoints(X, im_height=frame.shape[0], im_width=frame.shape[1])
+                    X = np.array(X, dtype=np.float32)
+                    if SHOW_KEYPOINTS:
+                        frame = annotate_frame(frame, X[-1])
                     C = 2
                     T = 0
                     K = 1
@@ -230,10 +361,9 @@ def display_webcam_feed():
                         if means[0] < means[1]:
                             print(f"Shoplifting detected in individual {i} with confidence {means[0].item()}")
                             quit()
-                    print(f"Reached 100 individuals, stopping tracking. Shape is {dim(tracking_individuals)}")
+                        
+                    print(f"No Shoplifting detected in individual {i} with confidence {means[0].item()}")
         print("Got Keypoints")
-        for s in keypoints:
-            frame = annotate_frame(frame, s)
         print("Annotated Frame")
         # If frame is not read correctly, ret will be False
         if not ret:

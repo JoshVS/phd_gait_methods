@@ -68,7 +68,7 @@ class TrainValDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
-my_ds = ShopLiftingDataset(generate_test_video=None, 
+my_ds = ShopLiftingDataset(generate_test_video=3, 
                     max_samples=None,
                     max_classes=None, 
                     min_samples = 5,  
