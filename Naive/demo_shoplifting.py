@@ -8,10 +8,12 @@ import torch
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 HEADPOINT = "nose"
-CAPTURE_SOURCE = 0#"test.mp4"  # Change this to the index of your webcam or video file path
+CAPTURE_SOURCE = "test.mp4"  # Change this to the index of your webcam or video file path
 MODEL_LOAD_PATH = "weights/finished/shoplifting.pth"
 SHOW_KEYPOINTS = False  # Set to False to disable keypoint visualization
 
+KP_IM_WIDTH = 128
+KP_IM_HEIGHT = 128
 
 model = STGCN(weights_path=MODEL_LOAD_PATH).classifier
 
@@ -211,7 +213,7 @@ def im2kp(frame, min_frames = 2, im_height=512, im_width=640):
     # quit()
     curr_frame = []
     try:
-        results_generator = yolo_model.track(source=frame, show=True, conf=0.3, save=False, stream=False, verbose=True, imgsz=(im_height, im_width), max_det=1000)
+        results_generator = yolo_model.track(source=frame, show=True, conf=0.3, save=False, stream=False, verbose=True, imgsz=(KP_IM_WIDTH, KP_IM_HEIGHT), max_det=1000)
         # print(len(results_generator))
         # quit()
     except Exception as e:
@@ -356,13 +358,13 @@ def display_webcam_feed():
                     X = X.reshape((1,) + X.shape + (1,)) # Shape (1, 2, T, K)
                     X = torch.tensor(X, dtype=torch.float32).to(device)
                     with torch.no_grad():
-                        pred = model(X)[0,...]
-                        means = torch.mean(pred, dim=0, keepdim=True)[0,:]
-                        if means[0] < means[1]:
-                            print(f"Shoplifting detected in individual {i} with confidence {means[0].item()}")
+                        pred = model(X)[0,-1,:]
+                        # means = torch.mean(pred, dim=0, keepdim=True)[0,:]
+                        if pred[0] < pred[1]:
+                            print(f"Shoplifting detected in individual {i} with confidence {pred[0].item()}")
                             quit()
                         
-                    print(f"No Shoplifting detected in individual {i} with confidence {means[0].item()}")
+                    print(f"No Shoplifting detected in individual {i} with confidence {pred[0].item()} and {pred[1].item()}")
         print("Got Keypoints")
         print("Annotated Frame")
         # If frame is not read correctly, ret will be False

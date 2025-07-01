@@ -39,11 +39,11 @@ async def start_tensorboard(direc):
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-SAVE_MODEL = 50
+SAVE_MODEL = 10
 LOAD_MODEL = False
 MODEL_NAME = "model_checkpoints"
 TUNE = False
-DROPOUT = 0.8
+DROPOUT = 0.9
 WEIGHT_DECAY = 1e-2
 WEIGHTS_PATH = "shoplifting.pth"
 

@@ -68,11 +68,11 @@ class TrainValDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
-my_ds = ShopLiftingDataset(generate_test_video=3, 
+my_ds = ShopLiftingDataset(generate_test_video=None, 
                     max_samples=None,
                     max_classes=None, 
                     min_samples = 5,  
-                    num_timesteps=100)
+                    num_timesteps=30)
 
 
 TEST_SIZE = 0.1

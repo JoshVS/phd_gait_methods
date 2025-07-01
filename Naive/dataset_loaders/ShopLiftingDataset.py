@@ -563,7 +563,7 @@ class ShopLiftingDataset(GenericGaitDataset):
             if self.classes[curr_class] == 'Normal':
                 curr_y = [curr_class] * curr_vid_len
             else:
-                curr_y = ([curr_class] * (curr_vid_len//2)) + ([abs(curr_class - 1)] * (curr_vid_len - curr_vid_len//2))
+                curr_y = [curr_class] * curr_vid_len #([curr_class] * (curr_vid_len//2)) + ([abs(curr_class - 1)] * (curr_vid_len - curr_vid_len//2))
             
             for k in range(curr_vid_len - min_frames):
                 new_x.append(self.X[i][0][k:k + min_frames])
