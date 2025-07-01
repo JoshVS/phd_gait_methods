@@ -1,4 +1,5 @@
 from classifiers.shoplifting_classifier import STGCN, BATCH_SIZE
+from dataset_loaders.ShopLiftingDataset import ShopLiftingDataset
 import cv2
 import numpy as np
 
@@ -12,10 +13,12 @@ CAPTURE_SOURCE = "test.mp4"  # Change this to the index of your webcam or video 
 MODEL_LOAD_PATH = "weights/finished/shoplifting.pth"
 SHOW_KEYPOINTS = False  # Set to False to disable keypoint visualization
 
+TIMESTEPS = 30  # Number of timesteps for the STGCN model
+
 KP_IM_WIDTH = 128
 KP_IM_HEIGHT = 128
 
-model = STGCN(weights_path=MODEL_LOAD_PATH).classifier
+model = STGCN(weights_path=MODEL_LOAD_PATH, timesteps=TIMESTEPS).classifier
 
 yolo_model = YOLO("yolov8x-pose-p6.pt")
 
@@ -201,71 +204,18 @@ def annotate_frame(frame, keypoints, im_height=480, im_width=640):
     return ann_frame
 
 
-def im2kp(frame, min_frames = 2, im_height=512, im_width=640):
-    torch.set_default_dtype(torch.float32)
+def draw_boxes(frame, boxes, c):
+    """
+    Draws bounding boxes on the frame.
     
-    
-    # bounding_boxes = yolo_model([os.path.join(filename, f) for f in frames], save=False, verbose=False)
-    
-
-    found_frame = False
-    # print(os.path.join(filename, frame))
-    # quit()
-    curr_frame = []
-    try:
-        results_generator = yolo_model.track(source=frame, show=True, conf=0.3, save=False, stream=False, verbose=True, imgsz=(KP_IM_WIDTH, KP_IM_HEIGHT), max_det=1000)
-        # print(len(results_generator))
-        # quit()
-    except Exception as e:
-        print(e)
-        return None
-    for i in range(2):
-        for k in kp_dict.keys():
-            curr_frame.append([i, k, 0, 0])
-
-    # print(dir(results_generator[0]))
-    # quit()
-    
-    for i, res in enumerate(results_generator):
-        if i >= 2:
-            break
-        
-        
-        
-        kpts = res.keypoints.xy.cpu().numpy()[0, ...] # Shape (17, 2)
-        if kpts.shape[0] != 0:
-            found_frame = True  
-            bbox = res.boxes.xywh.cpu().numpy()[0, ...] # Shape (4,)
-            xA, yA, w, h = bbox
-            for k in kp_dict.keys():
-                v = kp_dict[k]
-                curr_frame[kpts.shape[0] * i + v] = [i,
-                                                      k, 
-                                                      (kpts[v, 0] - xA) / w, 
-                                                      (yA - kpts[v, 1]) / h]
-    
-
-        # if pose_results.pose_landmarks is not None:
-        #     found_frame = True
-        #     for k in kp_dict.keys():
-        #         v = kp_dict[k]
-        #         curr_frame.append([i, k, pose_results.pose_landmarks.landmark[v].x, pose_results.pose_landmarks.landmark[v].y, pose_results.pose_landmarks.landmark[v].z])
-                # print(dir(pose_results.pose_world_landmarks))
-                # quit()
-    if found_frame:
-        return curr_frame
-    else:
-        print("No frame found")
-        return None
-
-def reshape_skeletons(skeletons):
-        if len(skeletons) %17 != 0:
-            raise ValueError("Skeletons must be a multiple of 17 keypoints per person")
-        reshaped_skel = [None] * (len(skeletons) // 17)
-        for i in range(len(reshaped_skel)):
-            reshaped_skel[i] = skeletons[i*17:(i+1)*17]
-        return reshaped_skel
-
+    Args:
+        frame (numpy.ndarray): The image frame on which to draw the boxes.
+        boxes (list): A list of bounding boxes, where each box is a tuple (x1, y1, x2, y2).
+        c (tuple): Color for the bounding box in BGR format.
+    """
+    for box in boxes:
+        x1, y1, x2, y2 = box
+        cv2.rectangle(frame, (x1, y1), (x1 + x2, y1 + y2), c, 2)
 
 
 def get_available_cameras():
@@ -302,6 +252,8 @@ def display_webcam_feed():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1000)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1000)
 
+    person_data = ShopLiftingDataset(directory=None, num_timesteps=TIMESTEPS)
+
 
     # Check if the webcam was opened successfully
     if not cap.isOpened():
@@ -328,43 +280,19 @@ def display_webcam_feed():
             print("Video Finished")
             break
         print("Getting Keypoints")
-        keypoints = im2kp(frame)
-        if keypoints is None:
-            print("No keypoints found in the frame.")
+        person_data.add_frame(frame)
             
-            print("Displaying Frame")        
-            cv2.imshow('Webcam Feed', frame)
-            continue
-        keypoints = reshape_skeletons(keypoints)
-        if len(keypoints) > len(tracking_individuals):
-            tracking_individuals.extend([[]] * (len(keypoints) - len(tracking_individuals)))
-            
-        for p in range(len(keypoints)):
-            if len(tracking_individuals[p]) >= 99:
-                tracking_individuals[p] = tracking_individuals[p][-99:]
-            tracking_individuals[p].append(keypoints[p])
-        if len(tracking_individuals) > 0:
-            for i in range(len(tracking_individuals)):
-                if len(tracking_individuals[i]) == 100:
-                    X = remove_unnecessary_info(tracking_individuals[i]) # Shape (T, K, 2)
-                    X = normalize_keypoints(X, im_height=frame.shape[0], im_width=frame.shape[1])
-                    X = np.array(X, dtype=np.float32)
-                    if SHOW_KEYPOINTS:
-                        frame = annotate_frame(frame, X[-1])
-                    C = 2
-                    T = 0
-                    K = 1
-                    X = X.transpose((C, T, K)) # Shape (2, T, K)
-                    X = X.reshape((1,) + X.shape + (1,)) # Shape (1, 2, T, K)
-                    X = torch.tensor(X, dtype=torch.float32).to(device)
-                    with torch.no_grad():
-                        pred = model(X)[0,-1,:]
-                        # means = torch.mean(pred, dim=0, keepdim=True)[0,:]
-                        if pred[0] < pred[1]:
-                            print(f"Shoplifting detected in individual {i} with confidence {pred[0].item()}")
-                            quit()
-                        
-                    print(f"No Shoplifting detected in individual {i} with confidence {pred[0].item()} and {pred[1].item()}")
+        if person_data.has_people():
+            for i in range(person_data.X.shape[0]):
+                with torch.no_grad():
+                    pred = model(person_data.get_skeletons(i))[0,-1,:]
+                    if pred[0] < pred[1]:
+                        draw_boxes(frame, person_data.bboxes[i], (255, 0, 0))
+                        print(f"Shoplifting detected in individual {i} with confidence {pred[0].item()}")
+                        quit()
+                    else:
+                        draw_boxes(frame, person_data.bboxes[i], (0, 255, 0))
+                        print(f"No Shoplifting detected in individual {i} with confidence {pred[0].item()} and {pred[1].item()}")
         print("Got Keypoints")
         print("Annotated Frame")
         # If frame is not read correctly, ret will be False

@@ -15,7 +15,7 @@ from celluloid import Camera
 torch.set_default_dtype(torch.float32)
 yolo_model = YOLO("yolov8x-pose-p6.pt")
 
-READ_FROM_CACHE = True
+READ_FROM_CACHE = False
 WRITE_TO_CACHE = True
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -154,26 +154,105 @@ def dim(l, check_for_error=False):
     return tuple(_dim(l, check_for_error))
 
 def read_from_cached_file(filename, min_samples=2):
+    # """
+    # Reads in a cached keypoint file and extracts keypoints in that file.
+
+    # Args:
+    #     filename : The filename of the keypoints. 
+
+    # Returns:
+    #     list :  shape (timesteps, 17, 4). Each timestep contains 17 keypoints, and each keypoint contains i (person index), k (keypoint name), x and y (normalized to the bounding box).
+    # """
+    # with open(filename, 'r') as in_file:
+    #     lines = in_file.read().split("\n")
+    # curr_data = []
+    # for line in lines:
+    #     print(lines)
+    #     quit()
+    #     if line == "": continue
+    #     i, kp, x, y = line.split(";")
+    #     curr_data.append([int(i), kp, float(x), float(y)])
+    # if curr_data == [] or (len(curr_data) // 33) * 2 < min_samples:
+    #     return None
+    # return curr_data
+
+
     """
-    Reads in a cached keypoint file and extracts keypoints in that file.
+    Reads keypoints from a cached file written in the ShopLiftingDataset format.
 
     Args:
-        filename : The filename of the keypoints. 
+        filename (str): Path to the cached keypoints file.
 
     Returns:
-        list :  shape (timesteps, 17, 4). Each timestep contains 17 keypoints, and each keypoint contains i (person index), k (keypoint name), x and y (normalized to the bounding box).
+        list: Nested list of shape (timesteps, M, 17, 4), where each entry contains
+                [person_index, keypoint_name, x, y].
     """
-    with open(filename, 'r') as in_file:
-        lines = in_file.read().split("\n")
-    curr_data = []
+    kps = []
+    with open(filename, "r") as infile:
+        lines = infile.read().splitlines()
     for line in lines:
-        if line == "": continue
-        i, kp, x, y = line.split(";")
-        curr_data.append([int(i), kp, float(x), float(y)])
-    if curr_data == [] or (len(curr_data) // 33) * 2 < min_samples:
+        if not line.strip():
+            continue
+        timestep = []
+        people = line.split("/")
+        for person in people:
+            if not person.strip():
+                continue
+            keypoints = []
+            kp_entries = person.split(";")
+            for kp in kp_entries:
+                if not kp.strip():
+                    continue
+                parts = kp.split(",")
+                if len(parts) != 4:
+                    continue
+                i, k, x, y = parts
+                keypoints.append([int(i), k, float(x), float(y)])
+            timestep.append(keypoints)
+        kps.append(timestep)
+    if kps == []:
         return None
-    return curr_data
+    return kps
     
+
+def kp_from_frame(frame, kp_dict, show=False, return_bbox=False):
+    """
+    Extracts keypoints from a single frame using a YOLOv8 pose model.
+
+    Returns list of shape (M * 17, 4) where M is the number of people detected in the frame.
+    """
+    found_frame = False
+    curr_frame = []
+    
+    try:
+        results_generator = yolo_model(source=frame, show=show, conf=0.3, save=False, stream=True, verbose=False)
+    except Exception as e:
+        return None
+
+    bboxes = []
+    for i, res in enumerate(results_generator):
+        curr_frame.append([])
+        
+        kpts = res.keypoints.xy.cpu().numpy()[0, ...] # Shape (17, 2)
+        if kpts.shape[0] != 0:
+            found_frame = True  
+            
+            bbox = res.boxes.xywh.cpu().numpy()[0,...]
+            bboxes.append(bbox)
+            xA, yA, w, h = bbox
+            for k in kp_dict.keys():
+                v = kp_dict[k]
+                curr_frame[-1].append([i, 
+                                   k, 
+                                   (kpts[v, 0] - xA) / w, 
+                                   (yA - kpts[v, 1]) / h]
+                )
+    if found_frame:
+        if return_bbox:
+            return curr_frame, bboxes
+        return curr_frame
+    else:
+        return None
 
 
 def get_kp_from_video(filename, kp_dict, min_frames = 2, im_height=256, im_width=256):    
@@ -185,7 +264,7 @@ def get_kp_from_video(filename, kp_dict, min_frames = 2, im_height=256, im_width
         kp_dict: A dictionary mapping keypoint names to their indices. There should be 17 keypoints, and kp_dict[k] = index of keypoint k.
 
     Returns:
-        list :  list is of shape (timesteps, 17, 4). Each timestep contains 17 keypoints, and each 
+        list :  list is of shape (timesteps, M, 17, 4). Each timestep contains 17 keypoints, and each 
                 keypoint contains i, the person index, k, the keypoint (str) and x and y, normalized to the bounding box.
     """
     
@@ -199,50 +278,19 @@ def get_kp_from_video(filename, kp_dict, min_frames = 2, im_height=256, im_width
             frames.append(frame)
             ret, frame = cv_frames.read()
     except Exception as e:
-        return None
-    # bounding_boxes = yolo_model([os.path.join(filename, f) for f in frames], save=False, verbose=False)
-    
+        return None    
 
     frame_results = []
 
     for  frame in frames:
-        curr_frame = []
-
-      
-        found_frame = False
-        # print(os.path.join(filename, frame))
-        # quit()
-        try:
-            results_generator = yolo_model(source=frame, show=False, conf=0.3, save=False, stream=True, verbose=False)
-            # print(len(results_generator))
-            # quit()
-        except Exception as e:
-            continue
-        for i in range(2):
-            for k in kp_dict.keys():
-                curr_frame.append([i, k, 0, 0])
-        
-        for i, res in enumerate(results_generator):
-            if i >= 2:
-                break
-            
-            kpts = res.keypoints.xy.cpu().numpy()[0, ...] # Shape (17, 2)
-            if kpts.shape[0] != 0:
-                found_frame = True  
-                
-                bbox = res.boxes.xywh.cpu().numpy()[0,...]
-                xA, yA, w, h = bbox
-                for k in kp_dict.keys():
-                    v = kp_dict[k]
-                    curr_frame[kpts.shape[0] * i + v] = [i, 
-                                                         k, 
-                                                         (kpts[v, 0] - xA) / w, 
-                                                         (yA - kpts[v, 1]) / h]
-                    
-        if found_frame:
-            frame_results.extend(curr_frame)
-    if len(frame_results) < (min_frames*len(kp_dict.keys()) * 2):
-        print(f"{filename} has less than {min_frames} frames, skipping")
+        curr_frame = kp_from_frame(frame, kp_dict)
+        if curr_frame is not None:
+            if len(curr_frame) > len(frame_results):
+                frame_results.extend([[]] * (len(curr_frame) - len(frame_results)))
+            for i in range(len(curr_frame)):
+                frame_results[i].append(curr_frame[i])
+    if len(frame_results) < 1:
+        print(f"{filename} has no people, skipping")
         return None
     return frame_results
 
@@ -253,7 +301,7 @@ def write_to_file(filename, kps):
 
     Args:
         filename : The filename to be written to.
-        kps : A list of shape (timesteps, 17, 4). Each timestep contains 17 keypoints, and each keypoint contains i (person index), k (keypoint name), x and y (normalized to the bounding box).
+        kps : A list of shape (timesteps, M, 17, 4). Each timestep contains 17 keypoints, and each keypoint contains i (person index), k (keypoint name), x and y (normalized to the bounding box).
 
     Returns:
         Nothing
@@ -264,13 +312,109 @@ def write_to_file(filename, kps):
         with open(filename, "w") as outfile:
             outfile.write("")
         return
-    for kp in kps:
-        curr_line = [";".join([str(x) for x in kp])]
-        lines.extend(curr_line)
+    for t in kps:
+        ilines = []
+        for m in t:
+            jlines = []
+            for k in m:
+                jlines.append(",".join([str(p) for p in k]))
+            ilines.append(";".join(jlines))
+        lines.append("/".join(ilines))
     with open(filename, "w") as outfile:
         outfile.write("\n".join(lines))
 
+def read_kps_from_file(filename):
+    """
+    Reads keypoints from a cached file written in the ShopLiftingDataset format.
+
+    Args:
+        filename (str): Path to the cached keypoints file.
+
+    Returns:
+        list: Nested list of shape (timesteps, M, 17, 4), where each entry contains
+                [person_index, keypoint_name, x, y].
+    """
+    kps = []
+    with open(filename, "r") as infile:
+        lines = infile.read().splitlines()
+    for line in lines:
+        if not line.strip():
+            continue
+        timestep = []
+        people = line.split("/")
+        for person in people:
+            if not person.strip():
+                continue
+            keypoints = []
+            kp_entries = person.split(";")
+            for kp in kp_entries:
+                if not kp.strip():
+                    continue
+                parts = kp.split(",")
+                if len(parts) != 4:
+                    continue
+                i, k, x, y = parts
+                keypoints.append([int(i), k, float(x), float(y)])
+            timestep.append(keypoints)
+        kps.append(timestep)
+    return kps
+
 class ShopLiftingDataset(GenericGaitDataset):
+    """
+    A dataset loader for the ShopliftingDataset, designed for gait analysis and classification tasks.
+    This class extends `GenericGaitDataset` and provides methods for loading, preprocessing, normalizing,
+    and splitting skeleton-based gait data extracted from video files. It supports caching, class exclusion,
+    time interpolation, and visualization of skeletons over video frames.
+    Args:
+        directory (str): Path to the dataset root directory. Defaults to '../../../Datasets/ShopliftingDataset/Dataset/'.
+        max_samples (int or float, optional): Maximum number of samples to load per class. If float in (0,1), interpreted as a fraction.
+        min_samples (int): Minimum number of samples required per class to include it. Defaults to 5.
+        t_interp (int): Interpolation factor for time dimension. Defaults to 6.
+        num_dims (int): Number of spatial dimensions for keypoints (usually 2 or 3). Defaults to 2.
+        generate_test_video (int, optional): If set, generates a visualization for the specified video index.
+        extract_steps (bool): Whether to extract step information from skeletons. Defaults to False.
+        test_split (float): Fraction of data to use as test set. Defaults to 0.1.
+        val_split (float): Fraction of training data to use as validation set. Defaults to 0.3.
+        max_classes (int, optional): Maximum number of classes to load.
+        num_timesteps (int): Number of frames per sample after time interpolation. Defaults to 12.
+        exclude_classes (list, optional): List of class names or indices to exclude from the dataset.
+    Attributes:
+        skel_data (list): Loaded skeleton data for all samples.
+        kp_indices (dict): Mapping from keypoint names to indices.
+        labels (list): List of class labels for each sample.
+        val_split (float): Validation split ratio.
+        min_samples (int): Minimum samples per class.
+        exclude_classes (list): Classes to exclude.
+        test_split (float): Test split ratio.
+        max_classes (int): Maximum number of classes.
+        num_timesteps (int): Number of frames per sample.
+        video_filenames (list): List of video file paths corresponding to samples.
+        classes (list): List of class names.
+        X (np.ndarray or torch.Tensor): Preprocessed input data.
+        y (np.ndarray or torch.Tensor): One-hot encoded class labels.
+        n_classes (int): Number of unique classes.
+        edge_matrix (list): Edge connections for skeleton graph.
+        connections (list): List of keypoint connections for visualization.
+        headpoint (str): Name of the head keypoint.
+        ... (other keypoint names as attributes)
+    Methods:
+        initialise_stuff(): Loads and preprocesses the dataset, normalizes skeletons, interpolates by time, and prepares labels.
+        n_skel(): Normalizes skeletons for each sample.
+        show_video(i, include_centroids=False, max_frames=200, outfile="plots.gif"): Visualizes skeletons overlaid on video frames.
+        _show_video(i, include_centroids=False, max_frames=200, outfile="plots.gif"): Helper for show_video.
+        convert_to_one_hot(): Converts class labels to one-hot encoding.
+        interpolate_by_time(convert_to_numpy=True): Interpolates skeleton sequences to fixed length.
+        split_train_and_test(): Splits data into training, validation, and test sets.
+        reshape_skeletons(): Reshapes raw skeleton data into (video, frame, keypoints, 2) format.
+        create_file_data(kp_dict, max_samples, max_classes): Loads skeleton data from files, applies caching, and filters classes.
+        _get_file_data(max_samples, max_classes): Prepares keypoint dictionary and loads data.
+        setup_information(): Sets up skeleton graph connections and keypoint indices.
+        create_edge_matrix(): Creates edge matrix for skeleton graph.
+        adjust_input_data(X): Adjusts input data shape for model compatibility.
+    Example:
+        dataset = ShopLiftingDataset(directory='path/to/data', max_samples=100, num_timesteps=12)
+    """
+    
 
     def __init__(self, directory='../../../Datasets/ShopliftingDataset/Dataset/', max_samples=None, min_samples=5, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None):
         
@@ -285,10 +429,11 @@ class ShopLiftingDataset(GenericGaitDataset):
 
     def initialise_stuff(self):
         torch.set_default_dtype(torch.float32)
-        self.skel_data, self.kp_indices, self.labels = self._get_file_data(self.max_samples, self.max_classes) # (n_people, n_files, n_lines, 3)
-        # print(self.skel_data)
-        # quit()
+        self.curr_people = []
         
+        self.kp_indices = self._get_file_data(self.max_samples, self.max_classes) 
+        if self.directory is not None:
+            self.skel_data, self.labels = self.create_file_data(self.kp_indices, self.max_samples, self.max_classes)
         
         
         
@@ -296,64 +441,95 @@ class ShopLiftingDataset(GenericGaitDataset):
 
         self.pc = [(self.kp_indices[a], self.kp_indices[b]) for (a, b) in self.connections ]
         
-        print("RESHAPING AND NORMALIZING SKELETONS")
-        self.X = self.reshape_skeletons()
-        self.X = self.n_skel()
-        # print(dim(self.X))
-        # quit()
+        if self.directory is not None:
+            print("RESHAPING AND NORMALIZING SKELETONS")
+            self.X = self.reshape_skeletons()
+            self.X = self.n_skel()
+            
         
-        
-        self.y  = self.labels
+            self.y  = self.labels
 
-        # print(self.X[1][0])
-        # quit()
         if self.generate_test_video is not None:
             self.show_video(self.generate_test_video)
    
 
-        # self.translation_vector()
-        # self.scaling_vector()
-        # quit()     
-        print("INTERPOLATING BY TIME")
+        if self.directory is not None:
+            print("INTERPOLATING BY TIME")
 
-        self.interpolate_by_time()
-        self.stratify_y = self.y.copy()
-        # print(self.y)
-        # quit()
-        # sns.histplot(np.array(self.y), x=self.classes)
-        y_unique, counts = np.unique(self.y, return_counts=True)
-        plt.figure()
-        plt.bar(self.classes, counts)
-        plt.xticks(rotation=90)
-        plt.savefig("class_dist.png")
-        plt.close()
+            self.interpolate_by_time()
+            self.stratify_y = self.y.copy()
+            y_unique, counts = np.unique(self.y, return_counts=True)
+            plt.figure()
+            plt.bar(self.classes, counts)
+            plt.xticks(rotation=90)
+            plt.savefig("class_dist.png")
+            plt.close()
 
 
         
-        self.n_classes = len(np.unique(self.y))
-        self.y = self.convert_to_one_hot()
+            self.n_classes = len(np.unique(self.y))
+            self.y = self.convert_to_one_hot()
+        
+            self.y_raw = self.y.copy()
+            self.y = torch.Tensor(self.y)
+            self.X = self.adjust_input_data(self.X)
+
+    def add_frame(self, frame):
+        kp_results = kp_from_frame(frame, self.kp_indices, show=True, return_bbox=True)
+        if kp_results is None:
+            return
+        curr_frame, curr_bboxes = kp_results
+        self.bboxes = curr_bboxes
+        if len(curr_frame) // 17 > len(self.curr_people):
+            # Update X to match number of people
+            self.curr_people.extend([[]] * (len(curr_frame) // 17 - len(self.curr_people)))
+        for i in range(len(curr_frame)// 17):
+            curr_person = []
+            for j in range(len(curr_frame)):
+                if curr_frame[j][0] == i:
+                    curr_person.append(curr_frame[j])               
+
+
+            if len(self.curr_people[i]) < self.num_timesteps:
+                self.curr_people[i].append(curr_person)
+            else:
+                self.curr_people[i] = self.curr_people[i][1:] + [curr_person]
+
+        self.X = []
+        for i in range(len(self.curr_people)):
+            if len(self.curr_people[i]) == self.num_timesteps:
+                self.X.append(self.curr_people[i])
+
+        if len(self.X) > 0:
+            self.X = self.reshape_skeletons(skel_data=self.X, unmash_kp=False)
+            self.X = self.n_skel(streaming=True)
+            self.X = np.array(self.X, dtype=np.float32)
+            self.X = self.adjust_input_data(self.X)
+
+    def get_skeletons(self, skel_ids=None):
+        if skel_ids is None:
+            return self.X
+        else:
+            return self.X[skel_ids]
+    
+    def has_people(self):
+        return len(self.X) > 0
+
         
 
-        # self.interpolate_by_time()
-        
-
-        # self.q = self.quality_matrices()
-
-        self.y_raw = self.y.copy()
-        self.y = torch.Tensor(self.y)
-        # self.y = self.to_one_hot()
-        # self.X = self.get_position_vectors()
-        self.X = self.adjust_input_data(self.X)
-        # self.split_train_and_test()
-        print("ALL FINISHED")
-
-    def n_skel(self):
+    def n_skel(self, streaming=False):
         # Shape (N, 2, 351, 17, 2)
-        for i in range(len(self.X)):
-            for j in range(len(self.X[i])):
-                for k in range(len(self.X[i][j])):
-                    self.X[i][j][k] = normalize_skeleton(self.X[i][j][k])
-        return self.X
+        if not streaming:
+            for i in range(len(self.X)):
+                for j in range(len(self.X[i])):
+                    for k in range(len(self.X[i][j])):
+                        self.X[i][j][k] = normalize_skeleton(self.X[i][j][k])
+            return self.X
+        else:
+            for i in range(len(self.X)):
+                for j in range(len(self.X[i])):
+                    self.X[i][j] = normalize_skeleton(self.X[i][j])
+            return self.X
 
     def show_video(self, i, include_centroids=False, max_frames=200, outfile = "plots.gif"):
         # print(self.classes, self.video_filenames)
@@ -453,21 +629,29 @@ class ShopLiftingDataset(GenericGaitDataset):
         self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X_train, self.y_train, test_size=self.val_split)
 
 
-    def reshape_skeletons(self):
+    def reshape_skeletons(self, skel_data=None, unmash_kp = True):
+        if skel_data is None:
+            skel_data = self.skel_data
         # Need skeleton to be shape (vid_seq, frame, keypoints, 2)
         reshaped_skel = []
         reshaped_z_data = []
-        for i, person in enumerate(self.skel_data):
+        for i, person in enumerate(skel_data):
             # reshaped_skel.append([])
-            reshaped_skel.append([[],[]])
-            for l in person:
-                # quit()
-                if l[1] == self.headpoint:
-                    reshaped_skel[-1][l[0]].append([])
-                reshaped_skel[-1][l[0]][-1].append(l[2:])
+            if unmash_kp:
+                reshaped_skel.append([[],[]])
+                for l in person:
+                    # quit()
+                    if l[1] == self.headpoint:
+                        reshaped_skel[-1][l[0]].append([])
+                    reshaped_skel[-1][l[0]][-1].append(l[2:])
 
-        
-            
+            else:
+                reshaped_skel.append([])
+                for t in person:
+                    reshaped_skel[-1].append([])
+                    for k in t:
+                        reshaped_skel[-1][-1].append(k[2:])
+
         return reshaped_skel
 
     def create_file_data(self, kp_dict, max_samples, max_classes):
@@ -532,23 +716,22 @@ class ShopLiftingDataset(GenericGaitDataset):
                     ret_val = read_from_cached_file(os.path.join(self.directory, "cached/", f"{vid}.txt"))
                     
                     if ret_val is not None:
-                        num_samples += 1
+                        num_samples += len(ret_val)
                         to_append= ret_val
-                        to_append = [[ind, a, b, c] for (ind, a, b, c) in to_append]
-                        tmp_vids.append(to_append)
-                        tmp_vid_filenames.append(os.path.join(self.directory,class_name, vid))
-                        tmp_classes.append(class_idx)
+                        tmp_vids.extend(to_append)
+                        tmp_vid_filenames.extend([os.path.join(self.directory,class_name, vid)] * len(to_append))
+                        tmp_classes.extend([class_idx] * len(to_append))
                 else:
                     print(f"[{class_idx + 1} / {len(classe_names)}]File cached/{vid}.txt doesn't exist, creating")
                     filename = os.path.join(self.directory, class_name, vid)
                     c = get_kp_from_video(filename, kp_dict)
                     if c is not None:
                         num_samples += 1
-                        tmp_vids.append(c)
+                        tmp_vids.extend(c)
                         tmp_vid_filenames.append(filename)
                         if WRITE_TO_CACHE:
                             write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), c)
-                        tmp_classes.append(class_idx)
+                        tmp_classes.extend([class_idx] * len(c))
                     else:
                         if WRITE_TO_CACHE:
                             write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), "")
@@ -579,7 +762,7 @@ class ShopLiftingDataset(GenericGaitDataset):
 
         self.video_filenames = vid_filenames
         self.classes = classe_names
-        return videos, kp_dict, classes
+        return videos, classes
 
 
     def _get_file_data(self, max_samples, max_classes):
@@ -605,7 +788,8 @@ class ShopLiftingDataset(GenericGaitDataset):
         kp_dict = {}
         for i, s in enumerate(keypoints_arr):
             kp_dict[s] = i
-        return self.create_file_data(kp_dict, max_samples, max_classes)
+        return kp_dict
+        return 
         
 
     def setup_information(self):               

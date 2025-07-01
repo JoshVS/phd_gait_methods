@@ -257,7 +257,7 @@ class MarcSTGCN(nn.Module):
         return self.fc(x).view(N, T, -1) # in shape: (batch, times, num_classes)
 
 class STGCN:
-    def __init__(self, ds=None, loss_fn=torch.nn.functional.cross_entropy, model_name=MODEL_NAME, weights_path=None):
+    def __init__(self, ds=None, loss_fn=torch.nn.functional.cross_entropy, model_name=MODEL_NAME, weights_path=None, timesteps=None):
         
         torch.set_default_dtype(torch.float32)
         self.model_name = model_name
@@ -265,7 +265,7 @@ class STGCN:
         if weights_path is not None:
             self.graph = create_ultralytics_graph()
             model_weights = torch.load(weights_path, map_location=device )
-            self.classifier = MarcSTGCN(2,17, 1, 2, self.graph, 100).to(device)
+            self.classifier = MarcSTGCN(2,17, 1, 2, self.graph, timesteps).to(device)
             self.classifier.load_state_dict(model_weights)
             print(f"Loaded model from {weights_path}")
             return
