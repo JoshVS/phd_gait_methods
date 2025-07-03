@@ -15,7 +15,7 @@ from celluloid import Camera
 torch.set_default_dtype(torch.float32)
 yolo_model = YOLO("yolov8x-pose-p6.pt")
 
-READ_FROM_CACHE = False
+READ_FROM_CACHE = True
 WRITE_TO_CACHE = True
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -517,7 +517,7 @@ class ShopLiftingDataset(GenericGaitDataset):
 
         
 
-    def n_skel(self, streaming=False):
+    def n_skel(self, streaming=True):
         # Shape (N, 2, 351, 17, 2)
         if not streaming:
             for i in range(len(self.X)):
@@ -611,25 +611,22 @@ class ShopLiftingDataset(GenericGaitDataset):
         new_y = []
         for i in range(len(self.X)):
             curr_class = self.y[i]
-            curr_vid_len = len(self.X[i][0])
-            if self.classes[curr_class] == 'Normal':
-                curr_y = [curr_class] * curr_vid_len
-            else:
-                curr_y = [curr_class] * curr_vid_len
+            curr_vid_len = len(self.X[i])
+           
+            curr_y = [curr_class] * curr_vid_len
             
             for k in range(curr_vid_len - min_frames):
-                new_x.append(self.X[i][0][k:k + min_frames])
+                new_x.append(self.X[i][k:k + min_frames])
                 new_y.append(curr_y[k:k + min_frames])
         if convert_to_numpy:
             self.X = np.array(new_x, dtype=np.double)
             self.y = np.array(new_y, dtype=np.int32)
-
     def split_train_and_test(self):
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y, test_size=self.test_split)
         self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X_train, self.y_train, test_size=self.val_split)
 
 
-    def reshape_skeletons(self, skel_data=None, unmash_kp = True):
+    def reshape_skeletons(self, skel_data=None, unmash_kp = False):
         if skel_data is None:
             skel_data = self.skel_data
         # Need skeleton to be shape (vid_seq, frame, keypoints, 2)
