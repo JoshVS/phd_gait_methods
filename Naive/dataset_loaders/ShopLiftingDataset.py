@@ -154,29 +154,6 @@ def dim(l, check_for_error=False):
     return tuple(_dim(l, check_for_error))
 
 def read_from_cached_file(filename, min_samples=2):
-    # """
-    # Reads in a cached keypoint file and extracts keypoints in that file.
-
-    # Args:
-    #     filename : The filename of the keypoints. 
-
-    # Returns:
-    #     list :  shape (timesteps, 17, 4). Each timestep contains 17 keypoints, and each keypoint contains i (person index), k (keypoint name), x and y (normalized to the bounding box).
-    # """
-    # with open(filename, 'r') as in_file:
-    #     lines = in_file.read().split("\n")
-    # curr_data = []
-    # for line in lines:
-    #     print(lines)
-    #     quit()
-    #     if line == "": continue
-    #     i, kp, x, y = line.split(";")
-    #     curr_data.append([int(i), kp, float(x), float(y)])
-    # if curr_data == [] or (len(curr_data) // 33) * 2 < min_samples:
-    #     return None
-    # return curr_data
-
-
     """
     Reads keypoints from a cached file written in the ShopLiftingDataset format.
 
@@ -188,11 +165,20 @@ def read_from_cached_file(filename, min_samples=2):
                 [person_index, keypoint_name, x, y].
     """
     kps = []
+    guilty_people = []
     with open(filename, "r") as infile:
         lines = infile.read().splitlines()
+    if len(lines) == 0:
+        return None
     for line in lines:
         if not line.strip():
             continue
+        try:
+            guilty_people.append(float(line))
+            continue
+        except Exception as e:
+            pass
+        
         timestep = []
         people = line.split("/")
         for person in people:
@@ -210,12 +196,10 @@ def read_from_cached_file(filename, min_samples=2):
                 keypoints.append([int(i), k, float(x), float(y)])
             timestep.append(keypoints)
         kps.append(timestep)
-    if kps == []:
-        return None
-    return kps
+    return kps, guilty_people
     
 
-def kp_from_frame(frame, kp_dict, show=False, return_bbox=False):
+def kp_from_frame(frame, kp_dict, annotations=None, show=False, return_bbox=False):
     """
     Extracts keypoints from a single frame using a YOLOv8 pose model.
 
@@ -225,37 +209,57 @@ def kp_from_frame(frame, kp_dict, show=False, return_bbox=False):
     curr_frame = []
     
     try:
-        results_generator = yolo_model(source=frame, show=show, conf=0.3, save=False, stream=True, verbose=False)
+        results_generator = yolo_model(source=frame, show=show, conf=0.15, save=False, stream=True, verbose=False)
     except Exception as e:
         return None
 
     bboxes = []
+    if annotations is not None:
+        did_shoplifting = []
+        time, x, y = annotations
     for i, res in enumerate(results_generator):
-        curr_frame.append([])
         
-        kpts = res.keypoints.xy.cpu().numpy()[0, ...] # Shape (17, 2)
-        if kpts.shape[0] != 0:
+        kpts = res.keypoints.xy.cpu().numpy() # Shape (17, 2)
+        if kpts.shape[1] == 0:
+            continue
+        person_bboxes = res.boxes.xyxyn.cpu().numpy()
+        check_boxes = res.boxes.xyxyn.cpu().numpy()
+        for j in range(kpts.shape[0]):
+            curr_frame.append([])
             found_frame = True  
+
             
-            bbox = res.boxes.xywh.cpu().numpy()[0,...]
+            bbox = person_bboxes[j]
+            xc1, yc1, xc2, yc2 = check_boxes[j,...]
+            if annotations is not None:
+                if point_is_in_box((x, y), (xc1, yc1, xc2, yc2)):
+                    did_shoplifting.append(time)
+                else:
+                    did_shoplifting.append(-1)
             bboxes.append(bbox)
             xA, yA, w, h = bbox
             for k in kp_dict.keys():
                 v = kp_dict[k]
                 curr_frame[-1].append([i, 
                                    k, 
-                                   (kpts[v, 0] - xA) / w, 
-                                   (yA - kpts[v, 1]) / h]
+                                   (kpts[j, v, 0] - xA) / w, 
+                                   (yA - kpts[j, v, 1]) / h]
                 )
     if found_frame:
+        if annotations is not None:
+            curr_frame = (curr_frame, did_shoplifting)
         if return_bbox:
             return curr_frame, bboxes
         return curr_frame
     else:
         return None
 
+def point_is_in_box(point, box):
+    x1, x2, y1, y2 = box
+    xp, yp = point
+    return (x1 <= xp <= x2) and (y1 <= yp <= y2)
 
-def get_kp_from_video(filename, kp_dict, min_frames = 2, im_height=256, im_width=256):    
+def get_kp_from_video(filename, kp_dict, annotations=None, min_frames = 2, im_height=256, im_width=256):    
     """
     Reads in a video file and extracts keypoints using a YOLOv8 pose model.
 
@@ -281,10 +285,18 @@ def get_kp_from_video(filename, kp_dict, min_frames = 2, im_height=256, im_width
         return None    
 
     frame_results = []
+    if annotations is not None:
+        people_shoplfting = []
 
     for  frame in frames:
-        curr_frame = kp_from_frame(frame, kp_dict)
+        curr_frame = kp_from_frame(frame, kp_dict, annotations=annotations)
         if curr_frame is not None:
+            if annotations is not None:
+                curr_frame, did_shoplifting = curr_frame
+                if len(did_shoplifting) > len(people_shoplfting):
+                    people_shoplfting += [[]] * (len(did_shoplifting) - len(people_shoplfting))
+                for i in range(len(did_shoplifting)):
+                    people_shoplfting[i].append(did_shoplifting[i])
             if len(curr_frame) > len(frame_results):
                 frame_results.extend([[]] * (len(curr_frame) - len(frame_results)))
             for i in range(len(curr_frame)):
@@ -292,16 +304,18 @@ def get_kp_from_video(filename, kp_dict, min_frames = 2, im_height=256, im_width
     if len(frame_results) < 1:
         print(f"{filename} has no people, skipping")
         return None
+    if annotations is not None:
+        frame_results = (frame_results, people_shoplfting)
     return frame_results
 
 
-def write_to_file(filename, kps):
+def write_to_file(filename, kps, time=None, guilty=None):
     """
     Writes keypoints to a cached file
 
     Args:
         filename : The filename to be written to.
-        kps : A list of shape (timesteps, M, 17, 4). Each timestep contains 17 keypoints, and each keypoint contains i (person index), k (keypoint name), x and y (normalized to the bounding box).
+        kps : A list of shape (M, timesteps, 17, 4). Each timestep contains 17 keypoints, and each keypoint contains i (person index), k (keypoint name), x and y (normalized to the bounding box).
 
     Returns:
         Nothing
@@ -312,7 +326,14 @@ def write_to_file(filename, kps):
         with open(filename, "w") as outfile:
             outfile.write("")
         return
-    for t in kps:
+    for i, t in enumerate(kps):
+        if i is not None:
+            if i == guilty:
+                lines.append(str(time))
+            else:
+                lines.append(str(-1))
+        else:
+            lines.append(str(-1))
         ilines = []
         for m in t:
             jlines = []
@@ -323,41 +344,6 @@ def write_to_file(filename, kps):
     with open(filename, "w") as outfile:
         outfile.write("\n".join(lines))
 
-def read_kps_from_file(filename):
-    """
-    Reads keypoints from a cached file written in the ShopLiftingDataset format.
-
-    Args:
-        filename (str): Path to the cached keypoints file.
-
-    Returns:
-        list: Nested list of shape (timesteps, M, 17, 4), where each entry contains
-                [person_index, keypoint_name, x, y].
-    """
-    kps = []
-    with open(filename, "r") as infile:
-        lines = infile.read().splitlines()
-    for line in lines:
-        if not line.strip():
-            continue
-        timestep = []
-        people = line.split("/")
-        for person in people:
-            if not person.strip():
-                continue
-            keypoints = []
-            kp_entries = person.split(";")
-            for kp in kp_entries:
-                if not kp.strip():
-                    continue
-                parts = kp.split(",")
-                if len(parts) != 4:
-                    continue
-                i, k, x, y = parts
-                keypoints.append([int(i), k, float(x), float(y)])
-            timestep.append(keypoints)
-        kps.append(timestep)
-    return kps
 
 class ShopLiftingDataset(GenericGaitDataset):
     """
@@ -433,6 +419,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         
         self.kp_indices = self._get_file_data(self.max_samples, self.max_classes) 
         if self.directory is not None:
+            self.open_annotations(os.path.join(self.directory, "annotations.txt"))
             self.skel_data, self.labels = self.create_file_data(self.kp_indices, self.max_samples, self.max_classes)
         
         
@@ -457,6 +444,7 @@ class ShopLiftingDataset(GenericGaitDataset):
             print("INTERPOLATING BY TIME")
 
             self.interpolate_by_time()
+            self.adjust_classes(1)
             self.stratify_y = self.y.copy()
             y_unique, counts = np.unique(self.y, return_counts=True)
             plt.figure()
@@ -473,27 +461,54 @@ class ShopLiftingDataset(GenericGaitDataset):
             self.y_raw = self.y.copy()
             self.y = torch.Tensor(self.y)
             self.X = self.adjust_input_data(self.X)
+            print("DONE")
+
+    def adjust_classes(self, ratio):        
+        y_sum = np.sum(self.y, axis=1)
+        y_sum[y_sum > 0] = 1
+        y_unique, counts = np.unique(y_sum, return_counts=True)
+        max_class = y_unique[np.argmax(counts)]
+        y_first, = np.where(y_sum==max_class)   
+        num_y_samples = int(min(counts) * ratio)
+        to_delete = np.random.choice(y_first, size=(max(counts) - num_y_samples))
+        self.y = np.delete(self.y, to_delete, axis=0)
+        self.X = np.delete(self.X, to_delete, axis=0)
+
+
+
+    def open_annotations(self, filename):
+        with open(filename) as f:
+            lines = f.readlines()
+
+        self.shoplifting_data = {}
+
+        for line in lines:
+            fname, start_frame, x, y = line.split(",")
+            self.shoplifting_data[fname] = (float(start_frame), float(x), float(y))
 
     def add_frame(self, frame):
         kp_results = kp_from_frame(frame, self.kp_indices, show=True, return_bbox=True)
         if kp_results is None:
             return
+        
         curr_frame, curr_bboxes = kp_results
+        
         self.bboxes = curr_bboxes
-        if len(curr_frame) // 17 > len(self.curr_people):
+        if len(curr_frame)  > len(self.curr_people):
             # Update X to match number of people
-            self.curr_people.extend([[]] * (len(curr_frame) // 17 - len(self.curr_people)))
-        for i in range(len(curr_frame)// 17):
-            curr_person = []
-            for j in range(len(curr_frame)):
-                if curr_frame[j][0] == i:
-                    curr_person.append(curr_frame[j])               
+            self.curr_people.extend([[]] * (len(curr_frame)  - len(self.curr_people)))
+        for i in range(len(curr_frame)):
+            # self.curr_people[i].append(curr_frame[i])
+            # curr_person = []
+            # for j in range(len(curr_frame)):
+            #     if curr_frame[j][0] == i:
+            #         curr_person.append(curr_frame[j])               
 
 
             if len(self.curr_people[i]) < self.num_timesteps:
-                self.curr_people[i].append(curr_person)
+                self.curr_people[i].append(curr_frame[i])
             else:
-                self.curr_people[i] = self.curr_people[i][1:] + [curr_person]
+                self.curr_people[i] = self.curr_people[i][1:] + [curr_frame[i]]
 
         self.X = []
         for i in range(len(self.curr_people)):
@@ -609,11 +624,16 @@ class ShopLiftingDataset(GenericGaitDataset):
         min_frames = self.num_timesteps
         new_x = []
         new_y = []
-        for i in range(len(self.X)):
+        loop = tqdm(range(len(self.X)))
+        for i in loop:
             curr_class = self.y[i]
             curr_vid_len = len(self.X[i])
-           
-            curr_y = [curr_class] * curr_vid_len
+            if self.guilty_people[i] == -1:           
+                curr_y = [0] * curr_vid_len
+            else:
+                curr_y = [0] * int(curr_vid_len * self.guilty_people[i])
+                curr_y += [1] * (curr_vid_len - len(curr_y))
+            loop.set_postfix()
             
             for k in range(curr_vid_len - min_frames):
                 new_x.append(self.X[i][k:k + min_frames])
@@ -621,6 +641,7 @@ class ShopLiftingDataset(GenericGaitDataset):
         if convert_to_numpy:
             self.X = np.array(new_x, dtype=np.double)
             self.y = np.array(new_y, dtype=np.int32)
+            
     def split_train_and_test(self):
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y, test_size=self.test_split)
         self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X_train, self.y_train, test_size=self.val_split)
@@ -657,8 +678,10 @@ class ShopLiftingDataset(GenericGaitDataset):
         videos = []
         z_data = []
         vid_filenames = []
+        global_guilty_people = []
         classe_names = os.listdir(self.directory)
         classe_names.remove("cached")
+        classe_names.remove("annotations.txt")
         if self.exclude_classes is not None:
             tmp = {}
             for i, c in enumerate(classe_names):
@@ -706,34 +729,58 @@ class ShopLiftingDataset(GenericGaitDataset):
             tmp_z = []
             tmp_vids = []
             tmp_vid_filenames = []
+            guilty_people = []
             tmp_classes = []
 
             for i, vid in enumerate(loop):
                 if os.path.exists(os.path.join(self.directory, "cached/", f"{vid}.txt")) and READ_FROM_CACHE:
                     ret_val = read_from_cached_file(os.path.join(self.directory, "cached/", f"{vid}.txt"))
-                    
                     if ret_val is not None:
-                        num_samples += len(ret_val)
+                        ret_val, g = ret_val
+                    
+                        num_samples += 1#len(ret_val)
                         to_append= ret_val
                         tmp_vids.extend(to_append)
                         tmp_vid_filenames.extend([os.path.join(self.directory,class_name, vid)] * len(to_append))
-                        tmp_classes.extend([class_idx] * len(to_append))
+                        tmp_classes.extend([0] * len(to_append))
+                        guilty_people += g
+                        
                 else:
                     print(f"[{class_idx + 1} / {len(classe_names)}]File cached/{vid}.txt doesn't exist, creating")
                     filename = os.path.join(self.directory, class_name, vid)
-                    c = get_kp_from_video(filename, kp_dict)
+                    if class_name.lower() == "shoplifting":
+                        c = get_kp_from_video(filename, kp_dict, annotations=self.shoplifting_data[vid])
+                    else:
+                        c = get_kp_from_video(filename, kp_dict)
                     if c is not None:
+                        if class_name.lower()=="shoplifting":
+                            c, annot_data = c
                         num_samples += 1
                         tmp_vids.extend(c)
                         tmp_vid_filenames.append(filename)
+                        if class_name.lower() == "shoplifting":
+                            sums = []
+                            for s in range(len(annot_data)):
+                                sums.append(sum(annot_data[s]))
+                            guilty_person = np.argmax(sums)
+                            for g in range(guilty_person):
+                                guilty_people.append(-1)
+                            guilty_people.append(self.shoplifting_data[vid][0])
+                            for g in range(guilty_person + 1, len(sums)):
+                                guilty_people.append(-1)
+                            tmp_classes.extend([0] * len(c))
+                        else:
+                            tmp_classes.extend([0] * len(c))
+                            guilty_people.extend([-1] * len(c))
                         if WRITE_TO_CACHE:
-                            write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), c)
-                        tmp_classes.extend([class_idx] * len(c))
+                            if class_name.lower() == "shoplifting":
+                                write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), c, time=self.shoplifting_data[vid][0], guilty=guilty_person)
+                            else:
+                                write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), c)
                     else:
                         if WRITE_TO_CACHE:
                             write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), "")
-                
-                if num_samples == maximum_num_samples:
+                if num_samples >= maximum_num_samples:
                     print("Reached Maximum Samples")
                     break
             if num_samples >= self.min_samples:
@@ -741,24 +788,26 @@ class ShopLiftingDataset(GenericGaitDataset):
                 classes.extend(tmp_classes)
                 vid_filenames.extend(tmp_vid_filenames)
                 z_class_vids.extend(tmp_z)
+                global_guilty_people.extend(guilty_people)
             
-        i = 0
-        j = 0
-        while(i < len(classe_names)):
-            if classes.count(j) == 0:
-                print(f"Popping {classe_names[i]} (Class {i})")
-                classe_names.pop(i)
-                j += 1
-            else:
-                i += 1
-                j += 1
+        # i = 0
+        # j = 0
+        # while(i < len(classe_names)):
+        #     if classes.count(j) == 0:
+        #         print(f"Popping {classe_names[i]} (Class {i})")
+        #         classe_names.pop(i)
+        #         j += 1
+        #     else:
+        #         i += 1
+        #         j += 1
 
-        for i, val in enumerate(np.unique(classes)):
-            classes = [i if x==val else x for x in classes]
+        # for i, val in enumerate(np.unique(classes)):
+        #     classes = [i if x==val else x for x in classes]
        
 
         self.video_filenames = vid_filenames
         self.classes = classe_names
+        self.guilty_people = global_guilty_people
         return videos, classes
 
 

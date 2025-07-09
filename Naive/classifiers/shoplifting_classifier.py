@@ -58,7 +58,7 @@ L1 = 3
 L2 = 3
 L3 = 3
 
-BATCH_SIZE=64
+BATCH_SIZE=128
 
 EPOCHS = 100
 LR = 1e-4
@@ -580,14 +580,34 @@ class STGCN:
                     # train.report(scalar_metrics["train"])
                     loop.set_postfix(train_metrics["scalar"])
                 writer.add_scalars("Training", scalar_metrics["train"], epoch)
-                sns.heatmap(train_metrics["image"]["conf_mat"], annot=True, xticklabels=self.class_names, yticklabels=self.class_names)
+                train_hm = train_metrics["image"]["conf_mat"]
+                sum = 0
+                for i in range(len(train_hm)):
+                    for j in range(len(train_hm[i])):
+                        sum += train_hm[i][j]
+                
+                for i in range(len(train_hm)):
+                    for j in range(len(train_hm[i])):
+                        train_hm[i][j] /= sum * 100
+
+                sns.heatmap(train_hm, annot=True, fmt=".1%", xticklabels=self.class_names, yticklabels=self.class_names)
                 plt.xlabel("Predicted")
                 plt.ylabel("True")
                 writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
                 plt.close()
 
+                train_hm = val_metrics["image"]["val_conf_mat"]
+                sum = 0
+                for i in range(len(train_hm)):
+                    for j in range(len(train_hm[i])):
+                        sum += train_hm[i][j]
                 
-                sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=True, xticklabels=self.class_names, yticklabels=self.class_names)
+                for i in range(len(train_hm)):
+                    for j in range(len(train_hm[i])):
+                        train_hm[i][j] /= sum * 100
+
+                
+                sns.heatmap(train_hm, annot=True, fmt=".1%", xticklabels=self.class_names, yticklabels=self.class_names)
                 plt.xlabel("Predicted")
                 plt.ylabel("True")
                 writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)

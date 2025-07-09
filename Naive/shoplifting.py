@@ -69,9 +69,9 @@ class TrainValDataset(Dataset):
         return self.X[idx], self.y[idx]
 
 my_ds = ShopLiftingDataset(generate_test_video=None, 
-                    max_samples=30,
+                    max_samples=None,
                     max_classes=None, 
-                    min_samples = 5,  
+                    min_samples = 0,  
                     num_timesteps=30)
 
 

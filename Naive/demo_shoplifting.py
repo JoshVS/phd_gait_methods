@@ -15,12 +15,10 @@ SHOW_KEYPOINTS = False  # Set to False to disable keypoint visualization
 
 TIMESTEPS = 30  # Number of timesteps for the STGCN model
 
-KP_IM_WIDTH = 128
-KP_IM_HEIGHT = 128
+KP_IM_WIDTH = 512
+KP_IM_HEIGHT = 512
 
-model = STGCN(weights_path=MODEL_LOAD_PATH, timesteps=TIMESTEPS).classifier
-
-yolo_model = YOLO("yolov8x-pose-p6.pt")
+model = STGCN(weights_path=MODEL_LOAD_PATH, timesteps=TIMESTEPS).classifier.to(device)
 
 keypoints_arr = [
             "nose",
@@ -75,82 +73,6 @@ kp_dict = {}
 for i, s in enumerate(keypoints_arr):
     kp_dict[s] = i
 
-# Thanks Gemini
-def make_keypoints_rotation_invariant(keypoints, shoulder_indices=(5, 6), reference_point_index=0):
-    """
-    Makes a set of 2D keypoints rotation-invariant.
-
-    This function normalizes the rotation of a pose by aligning a reference bone
-    (e.g., shoulders) with the horizontal axis. It then translates the pose
-    so a specific reference point (e.g., nose) is at the origin.
-
-    Args:
-        keypoints (list or np.array): A Python list of lists or a NumPy array of shape (N, 2)
-                                      where N is the number of keypoints, and each inner list/row
-                                      is an (x, y) coordinate. Ultralytics models typically output
-                                      (x, y, confidence) so ensure you pass only the (x, y) part.
-        shoulder_indices (tuple): A tuple (left_shoulder_index, right_shoulder_index)
-                                  representing the indices of the shoulder keypoints
-                                  in the `keypoints` array. Default assumes COCO format
-                                  where 5 is left shoulder and 6 is right shoulder.
-        reference_point_index (int): The index of the keypoint to use as the
-                                     translation reference (e.g., nose). This
-                                     point will be moved to (0,0) after rotation.
-                                     Default assumes COCO format where 0 is nose.
-
-    Returns:
-        np.array: A NumPy array of shape (N, 2) with rotation-invariant keypoints.
-                  The keypoints are rotated and translated.
-    """
-    # Convert input list to NumPy array if it's not already one
-    if not isinstance(keypoints, np.ndarray):
-        keypoints = np.array(keypoints, dtype=float)
-
-    if keypoints.shape[0] < max(shoulder_indices) + 1:
-        print("Warning: Not enough keypoints for specified shoulder indices.")
-        # Return original keypoints if reference points are missing
-        return keypoints
-
-    # Extract shoulder keypoints
-    left_shoulder = keypoints[shoulder_indices[0]]
-    right_shoulder = keypoints[shoulder_indices[1]]
-
-    # Calculate the vector from left to right shoulder
-    shoulder_vector = right_shoulder - left_shoulder
-
-    # Calculate the angle of the shoulder vector with the positive x-axis
-    # atan2 gives the angle in radians, handling all quadrants
-    angle_rad = np.arctan2(shoulder_vector[1], shoulder_vector[0])
-
-    # Create a 2D rotation matrix for rotation by -angle_rad
-    # This rotates the pose so the shoulder line becomes horizontal
-    cos_val = np.cos(-angle_rad)
-    sin_val = np.sin(-angle_rad)
-    rotation_matrix = np.array([
-        [cos_val, -sin_val],
-        [sin_val, cos_val]
-    ])
-
-    # Translate all keypoints so the left shoulder is at the origin before rotation
-    # This ensures rotation happens around a point related to the pose itself
-    translated_keypoints = keypoints - left_shoulder
-
-    # Apply the rotation to all keypoints
-    rotated_keypoints = np.dot(translated_keypoints, rotation_matrix.T)
-
-    # Now, translate the rotated keypoints so the chosen reference point (e.g., nose)
-    # is at the origin (0,0). This makes the pose translation-invariant.
-    translation_vector = rotated_keypoints[reference_point_index]
-    rotation_invariant_keypoints = rotated_keypoints - translation_vector
-
-    return rotation_invariant_keypoints
-
-
-def normalize_keypoints(keypoints, im_height=480, im_width=640):
-    norm_kp = []
-    for i in range(len(keypoints)):
-        norm_kp.append(make_keypoints_rotation_invariant(keypoints[i]))
-    return norm_kp
 
 
 def remove_unnecessary_info(kp):
@@ -204,7 +126,7 @@ def annotate_frame(frame, keypoints, im_height=480, im_width=640):
     return ann_frame
 
 
-def draw_boxes(frame, boxes, c):
+def draw_box(frame, box, c):
     """
     Draws bounding boxes on the frame.
     
@@ -213,9 +135,14 @@ def draw_boxes(frame, boxes, c):
         boxes (list): A list of bounding boxes, where each box is a tuple (x1, y1, x2, y2).
         c (tuple): Color for the bounding box in BGR format.
     """
-    for box in boxes:
-        x1, y1, x2, y2 = box
-        cv2.rectangle(frame, (x1, y1), (x1 + x2, y1 + y2), c, 2)
+    c = (c[2], c[1], c[0])
+    h, w, _ = frame.shape
+    x1, y1, x2, y2 = box
+    x1 = int(x1 * w)
+    x2 = int(x2 * w)
+    y1 = int(y1 * h)
+    y2 = int(y2 * h)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), c, 2)
 
 
 def get_available_cameras():
@@ -249,8 +176,8 @@ def display_webcam_feed():
     # cap = cv2.VideoCapture(0)
     
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1000)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1000)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, KP_IM_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, KP_IM_HEIGHT)
 
     person_data = ShopLiftingDataset(directory=None, num_timesteps=TIMESTEPS)
 
@@ -279,29 +206,33 @@ def display_webcam_feed():
         if not ret:
             print("Video Finished")
             break
-        print("Getting Keypoints")
         person_data.add_frame(frame)
             
         if person_data.has_people():
-            for i in range(person_data.X.shape[0]):
-                with torch.no_grad():
-                    pred = model(person_data.get_skeletons(i))[0,-1,:]
-                    if pred[0] < pred[1]:
-                        draw_boxes(frame, person_data.bboxes[i], (255, 0, 0))
-                        print(f"Shoplifting detected in individual {i} with confidence {pred[0].item()}")
-                        quit()
-                    else:
-                        draw_boxes(frame, person_data.bboxes[i], (0, 255, 0))
-                        print(f"No Shoplifting detected in individual {i} with confidence {pred[0].item()} and {pred[1].item()}")
-        print("Got Keypoints")
-        print("Annotated Frame")
+            print("HAS PEOPLE")
+            with torch.no_grad():
+                pred = model(person_data.get_skeletons().to(device))[:,-1,:].to("cpu")
+            
+            for i in range(len(person_data.bboxes)):
+                if i >= pred.size()[0]:
+                    draw_box(frame, person_data.bboxes[i], (0, 0, 255))
+
+                elif pred[i, 0] < pred[i, 1]:
+                    draw_box(frame, person_data.bboxes[i], (255, 0, 0))
+                    print(f"Shoplifting detected in individual {i} with confidence {pred[i, 0].item()}")
+                    # quit()
+                else:
+                    draw_box(frame, person_data.bboxes[i], (0, 255, 0))
+                    print(f"No Shoplifting detected in individual {i} with confidence {pred[i, 0].item()} and {pred[i, 1].item()}")
+        else:
+            for i in range(len(person_data.bboxes)):
+                draw_box(frame, person_data.bboxes[i], (0, 0, 255))
         # If frame is not read correctly, ret will be False
         if not ret:
             print("Error: Failed to grab frame.")
             break
 
         # Display the captured frame in a window named 'Webcam Feed'
-        print("Displaying Frame")        
         cv2.imshow('Webcam Feed', frame)
 
         # Wait for 1 millisecond and check if the 'q' key is pressed
