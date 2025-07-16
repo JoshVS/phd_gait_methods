@@ -70,13 +70,15 @@ class TrainValDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
-my_ds = ShopLiftingDataset(generate_test_video=None, 
+my_ds = ShopLiftingDataset(generate_test_video=1, 
                     max_samples=None,
                     max_classes=None, 
                     min_samples = 0,  
                     num_timesteps=30,
                     skip_frames=SKIP_FRAMES)
 
+
+quit()
 
 VAL_SIZE = 0.3
 X_train, X_val, y_train, y_val = train_test_split(my_ds.X, my_ds.y, test_size=VAL_SIZE, shuffle=True, stratify=my_ds.stratify_y)

@@ -585,6 +585,8 @@ class ShopLiftingDataset(GenericGaitDataset):
                 break
             curr_frame = []
             kps = self.X[i][0][a]
+            print(dim(self.X))
+            quit()
                       
 
             coords = [k[:2] for k in kps]
