@@ -1,4 +1,4 @@
-from classifiers.shoplifting_classifier import STGCN, BATCH_SIZE
+from classifiers.incshoplifting import ShopLiftingInceptionClassifier, BATCH_SIZE
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 # from copy_dataset_loaders.CASIA_dataset import CASIADataset
@@ -87,4 +87,4 @@ ds = (train, val)
 
 # ds = CASIATorchDataset(CASIADataset(generate_test_video=None, max_samples=10))
 # print(dsiter.next())
-classifier = STGCN(ds)
+classifier = ShopLiftingInceptionClassifier(ds)

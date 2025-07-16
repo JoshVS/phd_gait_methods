@@ -222,14 +222,13 @@ def kp_from_frame(frame, kp_dict, annotations=None, show=False, return_bbox=Fals
         kpts = res.keypoints.xy.cpu().numpy() # Shape (17, 2)
         if kpts.shape[1] == 0:
             continue
-        person_bboxes = res.boxes.xyxyn.cpu().numpy()
         check_boxes = res.boxes.xyxyn.cpu().numpy()
         for j in range(kpts.shape[0]):
             curr_frame.append([])
             found_frame = True  
 
             
-            bbox = person_bboxes[j]
+            bbox = check_boxes[j]
             xc1, yc1, xc2, yc2 = check_boxes[j,...]
             if annotations is not None:
                 if point_is_in_box((x, y), (xc1, yc1, xc2, yc2)):
@@ -402,9 +401,10 @@ class ShopLiftingDataset(GenericGaitDataset):
     """
     
 
-    def __init__(self, directory='../../../Datasets/ShopliftingDataset/Dataset/', max_samples=None, min_samples=5, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None):
+    def __init__(self, directory='../../../Datasets/ShopliftingDataset/Dataset/', max_samples=None, min_samples=5, t_interp=6, num_dims=2, generate_test_video=None, extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None, skip_frames=1):
         
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
+        self.skip_frames = skip_frames
         self.val_split = val_split
         self.min_samples = min_samples
         self.exclude_classes = exclude_classes
@@ -444,7 +444,7 @@ class ShopLiftingDataset(GenericGaitDataset):
             print("INTERPOLATING BY TIME")
 
             self.interpolate_by_time()
-            self.adjust_classes(1)
+            self.adjust_classes(0.1)
             self.stratify_y = self.y.copy()
             y_unique, counts = np.unique(self.y, return_counts=True)
             plt.figure()
@@ -621,7 +621,7 @@ class ShopLiftingDataset(GenericGaitDataset):
 
 
     def interpolate_by_time(self, convert_to_numpy=True):
-        min_frames = self.num_timesteps
+        min_frames = self.num_timesteps * self.skip_frames
         new_x = []
         new_y = []
         loop = tqdm(range(len(self.X)))
@@ -636,8 +636,8 @@ class ShopLiftingDataset(GenericGaitDataset):
             loop.set_postfix()
             
             for k in range(curr_vid_len - min_frames):
-                new_x.append(self.X[i][k:k + min_frames])
-                new_y.append(curr_y[k:k + min_frames])
+                new_x.append(self.X[i][k:k + min_frames:self.skip_frames])
+                new_y.append(curr_y[k:k + min_frames:self.skip_frames])
         if convert_to_numpy:
             self.X = np.array(new_x, dtype=np.double)
             self.y = np.array(new_y, dtype=np.int32)

@@ -14,6 +14,7 @@ MODEL_LOAD_PATH = "weights/finished/shoplifting.pth"
 SHOW_KEYPOINTS = False  # Set to False to disable keypoint visualization
 
 TIMESTEPS = 30  # Number of timesteps for the STGCN model
+SKIP_FRAMES = 5
 
 KP_IM_WIDTH = 512
 KP_IM_HEIGHT = 512
@@ -198,6 +199,7 @@ def display_webcam_feed():
     frame_count = 0
     frames = []
     tracking_individuals = []
+    frame_no = 0
     while True:
         # Read a frame from the webcam
         # ret (boolean): True if the frame was read successfully, False otherwise
@@ -206,8 +208,12 @@ def display_webcam_feed():
         if not ret:
             print("Video Finished")
             break
-        person_data.add_frame(frame)
-            
+        if frame_no == 0:
+            person_data.add_frame(frame)
+        
+        frame_no += 1
+        print(frame_no)
+        frame_no %= SKIP_FRAMES
         if person_data.has_people():
             print("HAS PEOPLE")
             with torch.no_grad():

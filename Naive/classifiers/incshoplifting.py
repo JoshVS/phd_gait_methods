@@ -1,6 +1,16 @@
-"""
-Modified based on: https://github.com/open-mmlab/mmskeleton
-"""
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.autograd import Variable
+import math
+import numpy as np
+import asyncio
+import os
+import sys
+from collections import OrderedDict
+from ray import tune
+
+
 import sys
 import os
 import glob
@@ -24,12 +34,11 @@ from ray import train
 from ray import tune
 import ray
 from ray.tune.tuner import Tuner
-from ray.train import Checkpoint, get_checkpoint
+from ray.tune import Checkpoint, get_checkpoint
 from ray.tune.schedulers import ASHAScheduler
 import ray.cloudpickle as pickle
 from pathlib import Path
 import tempfile
-import asyncio
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.system("rm -rf runs/*")
@@ -39,224 +48,361 @@ async def start_tensorboard(direc):
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-SAVE_MODEL = 10
-LOAD_MODEL = False
+SAVE_MODEL = 1
+LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
 TUNE = False
-DROPOUT = 0.9
-WEIGHT_DECAY = 1e-2
-WEIGHTS_PATH = "shoplifting.pth"
+DROPOUT = 0.99
+WEIGHT_DECAY = 1e-1
 
-if not os.path.exists(os.path.join("weights", "train", MODEL_NAME)):
-    os.makedirs(os.path.join("weights", "train", MODEL_NAME))
+BATCH_SIZE=64
 
-
-if not os.path.exists(os.path.join("weights", "finished")):
-    os.makedirs(os.path.join("weights", "finished"))
-
-L1 = 3
-L2 = 3
-L3 = 3
-
-BATCH_SIZE=128
-
-EPOCHS = 40
-LR = 1e-4
-
-def force_cudnn_initialization():
-    if device == "cuda":
-        s = 32
-        dev = torch.device('cuda')
-        torch.nn.functional.conv2d(torch.zeros(s, s, s, s, device=dev), torch.zeros(s, s, s, s, device=dev))
-
-force_cudnn_initialization()
-# Hi Josh, 
-
-# Please find attached model code for the stgcn model as well as the graph creation class for mediapipe. 
-# The input shape for the st-gcn model is [batch_size, channels, number_of_frames, nodes, M]
-# Channels is usually 3 or 2 depending if you dealing with 3d or 2d coordinates
-# M is the number of people in the clip, for me it is always 1 person pose data I'm working with.
-
-def weights_init(module_, bs=1):
-    if isinstance(module_, nn.Conv2d) and bs == 1:
-        nn.init.kaiming_normal_(module_.weight, mode='fan_out')
-        nn.init.constant_(module_.bias, 0)
-    elif isinstance(module_, nn.Conv2d) and bs != 1:
-        nn.init.normal_(module_.weight, 0,
-                        math.sqrt(2. / (module_.weight.size(0) * module_.weight.size(1) * module_.weight.size(2) * bs)))
-        nn.init.constant_(module_.bias, 0)
-    elif isinstance(module_, nn.BatchNorm2d):
-        nn.init.constant_(module_.weight, bs)
-        nn.init.constant_(module_.bias, 0)
-    elif isinstance(module_, nn.Linear):
-        nn.init.normal_(module_.weight, 0, math.sqrt(2. / bs))
+EPOCHS = 100
+LR = 1e-5
 
 
-class GraphConvolution(nn.Module):
-    def __init__(self, in_channels, out_channels, A, cuda_, dropout=DROPOUT):
-        super(GraphConvolution, self).__init__()
-        self.cuda_ = cuda_
-        self.graph_attn = nn.Parameter(torch.from_numpy(A.astype(np.float32))) #graph_attn is the neighbourhoods - how is it represented?
-        nn.init.constant_(self.graph_attn, 1)
-        self.A = Variable(torch.from_numpy(A.astype(np.float32)), requires_grad=False)
 
-        # Create Convolutions for each neighbourhood
-        self.num_subset = 3 # number of neighbourhoods
-        self.g_conv = nn.ModuleList()
-        for i in range(self.num_subset):
-            self.g_conv.append(nn.Conv2d(in_channels, out_channels, 1)) # different convolutions for each neighbourhood
-            weights_init(self.g_conv[i], bs=self.num_subset)
-
-        # Residual connections
-        if in_channels != out_channels:
-            self.gcn_residual = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, 1),
-                nn.BatchNorm2d(out_channels)
-            )
-            weights_init(self.gcn_residual[0], bs=1)
-            weights_init(self.gcn_residual[1], bs=1)
+class MaxPool3dSamePadding(nn.MaxPool3d):
+    
+    def compute_pad(self, dim, s):
+        if s % self.stride[dim] == 0:
+            return max(self.kernel_size[dim] - self.stride[dim], 0)
         else:
-            self.gcn_residual = lambda x: x
-
-        # Create batch norm layers and dropout
-        self.bn = nn.BatchNorm2d(out_channels)
-        self.dropout = nn.Dropout(dropout)
-        weights_init(self.bn, bs=1e-6)
-        self.relu = nn.ReLU()
+            return max(self.kernel_size[dim] - (s % self.stride[dim]), 0)
 
     def forward(self, x):
-        """
-        x: (batch * people, channels, times, nodes)
-        """
-        N, C, T, V = x.size() # (batch, channels, timesteps, nodes)
-        if self.cuda_:
-            A = self.A.cuda(x.get_device())
+        # compute 'same' padding
+        (batch, channel, t, h, w) = x.size()
+        #print t,h,w
+        out_t = np.ceil(float(t) / float(self.stride[0]))
+        out_h = np.ceil(float(h) / float(self.stride[1]))
+        out_w = np.ceil(float(w) / float(self.stride[2]))
+        #print out_t, out_h, out_w
+        pad_t = self.compute_pad(0, t)
+        pad_h = self.compute_pad(1, h)
+        pad_w = self.compute_pad(2, w)
+        #print pad_t, pad_h, pad_w
+
+        pad_t_f = pad_t // 2
+        pad_t_b = pad_t - pad_t_f
+        pad_h_f = pad_h // 2
+        pad_h_b = pad_h - pad_h_f
+        pad_w_f = pad_w // 2
+        pad_w_b = pad_w - pad_w_f
+
+        pad = (pad_w_f, pad_w_b, pad_h_f, pad_h_b, pad_t_f, pad_t_b)
+        #print x.size()
+        #print pad
+        x = F.pad(x, pad)
+        return super(MaxPool3dSamePadding, self).forward(x)
+    
+
+class Unit3D(nn.Module):
+
+    def __init__(self, in_channels,
+                 output_channels,
+                 kernel_shape=(1, 1, 1),
+                 stride=(1, 1, 1),
+                 padding=0,
+                 activation_fn=F.relu,
+                 use_batch_norm=True,
+                 use_bias=False,
+                 name='unit_3d'):
+        
+        """Initializes Unit3D module."""
+        super(Unit3D, self).__init__()
+        
+        self._output_channels = output_channels
+        self._kernel_shape = kernel_shape
+        self._stride = stride
+        self._use_batch_norm = use_batch_norm
+        self._activation_fn = activation_fn
+        self._use_bias = use_bias
+        self.name = name
+        self.padding = padding
+        
+        self.conv3d = nn.Conv3d(in_channels=in_channels,
+                                out_channels=self._output_channels,
+                                kernel_size=self._kernel_shape,
+                                stride=self._stride,
+                                padding=0, # we always want padding to be 0 here. We will dynamically pad based on input size in forward function
+                                bias=self._use_bias)
+        
+        if self._use_batch_norm:
+            self.bn = nn.BatchNorm3d(self._output_channels, eps=0.001, momentum=0.01)
+
+    def compute_pad(self, dim, s):
+        if s % self._stride[dim] == 0:
+            return max(self._kernel_shape[dim] - self._stride[dim], 0)
         else:
-            A = self.A
-        A = A * self.graph_attn # apply neighbourhoods to edges
-        hidden_ = None
+            return max(self._kernel_shape[dim] - (s % self._stride[dim]), 0)
 
-        # Convolution for each neighbourhood
-        for i in range(self.num_subset):
-            x_a = x.view(N, C * T, V) #(batch, time * channel, nodes)
-
-            # Find nodes for this neighbourhood
-            # x_a: (batch, time * channel, nodes)
-            # A[i]: (nodes)
-
-            # output: (batch, channel, time, nodes)
-            # Effect: applies normalisation
-            z = self.g_conv[i](torch.matmul(x_a, A[i]).view(N, C, T, V))
-            hidden_ = z + hidden_ if hidden_ is not None else z
-        hidden_ = self.bn(hidden_)
-        hidden_ = self.dropout(hidden_)
-        hidden_ += self.gcn_residual(x)
-        return self.relu(hidden_)
-
-
-class TemporalConvolution(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=9, stride=1):
-        super(TemporalConvolution, self).__init__()
-
-        pad = int((kernel_size - 1) / 2)
-        self.t_conv = nn.Conv2d(in_channels, out_channels, kernel_size=(kernel_size, 1),
-                                padding=(pad, 0), stride=(stride, 1))
-        self.bn = nn.BatchNorm2d(out_channels)
-        weights_init(self.t_conv, bs=1)
-        weights_init(self.bn, bs=1)
-
+            
     def forward(self, x):
-        """
-        X: Shape (batch, channel, time, nodes)
-        """
-        x = self.bn(self.t_conv(x))
+        # compute 'same' padding
+        # print(x.size())
+        # quit()
+        (batch, channel, t, h, w) = x.size()
+        #print t,h,w
+        out_t = np.ceil(float(t) / float(self._stride[0]))
+        out_h = np.ceil(float(h) / float(self._stride[1]))
+        out_w = np.ceil(float(w) / float(self._stride[2]))
+        #print out_t, out_h, out_w
+        pad_t = self.compute_pad(0, t)
+        pad_h = self.compute_pad(1, h)
+        pad_w = self.compute_pad(2, w)
+        #print pad_t, pad_h, pad_w
+
+        pad_t_f = pad_t // 2
+        pad_t_b = pad_t - pad_t_f
+        pad_h_f = pad_h // 2
+        pad_h_b = pad_h - pad_h_f
+        pad_w_f = pad_w // 2
+        pad_w_b = pad_w - pad_w_f
+
+        pad = (pad_w_f, pad_w_b, pad_h_f, pad_h_b, pad_t_f, pad_t_b)
+        #print x.size()
+        #print pad
+        x = F.pad(x, pad)
+        #print x.size()        
+
+        x = self.conv3d(x)
+        if self._use_batch_norm:
+            x = self.bn(x)
+        if self._activation_fn is not None:
+            x = self._activation_fn(x)
         return x
 
 
-class ST_GCN_block(nn.Module):
-    def __init__(self, in_channels, out_channels, A, cuda_=False, stride=1, residual=True, dropout=DROPOUT):
-        super(ST_GCN_block, self).__init__()
 
-        self.gcn = GraphConvolution(in_channels, out_channels, A, cuda_, dropout=dropout)
-        self.tcn = TemporalConvolution(out_channels, out_channels, stride=stride)
-        self.relu = nn.ReLU()
-        if not residual:
-            self.residual = lambda x: 0
-        elif (in_channels == out_channels) and (stride == 1):
-            self.residual = lambda x: x
-        else:
-            self.residual = TemporalConvolution(in_channels, out_channels, kernel_size=1, stride=stride)
+class InceptionModule(nn.Module):
+    def __init__(self, in_channels, out_channels, name):
+        super(InceptionModule, self).__init__()
 
-    def forward(self, x):
-        """
-        x: (batch * people, channels, times, nodes)
-        """
-        # Graph convolution -> time convolution
-        x = self.tcn(self.gcn(x)) + self.residual(x)
-        return self.relu(x)
+        self.b0 = Unit3D(in_channels=in_channels, output_channels=out_channels[0], kernel_shape=[1, 1, 1], padding=0,
+                         name=name+'/Branch_0/Conv3d_0a_1x1')
+        self.b1a = Unit3D(in_channels=in_channels, output_channels=out_channels[1], kernel_shape=[1, 1, 1], padding=0,
+                          name=name+'/Branch_1/Conv3d_0a_1x1')
+        self.b1b = Unit3D(in_channels=out_channels[1], output_channels=out_channels[2], kernel_shape=[3, 3, 3],
+                          name=name+'/Branch_1/Conv3d_0b_3x3')
+        self.b2a = Unit3D(in_channels=in_channels, output_channels=out_channels[3], kernel_shape=[1, 1, 1], padding=0,
+                          name=name+'/Branch_2/Conv3d_0a_1x1')
+        self.b2b = Unit3D(in_channels=out_channels[3], output_channels=out_channels[4], kernel_shape=[3, 3, 3],
+                          name=name+'/Branch_2/Conv3d_0b_3x3')
+        self.b3a = MaxPool3dSamePadding(kernel_size=[3, 3, 3],
+                                stride=(1, 1, 1), padding=0)
+        self.b3b = Unit3D(in_channels=in_channels, output_channels=out_channels[5], kernel_shape=[1, 1, 1], padding=0,
+                          name=name+'/Branch_3/Conv3d_0b_1x1')
+        self.name = name
+
+    def forward(self, x):    
+        b0 = self.b0(x)
+        b1 = self.b1b(self.b1a(x))
+        b2 = self.b2b(self.b2a(x))
+        b3 = self.b3b(self.b3a(x))
+        return torch.cat([b0,b1,b2,b3], dim=1)
 
 
-class MarcSTGCN(nn.Module):
-    def __init__(self, num_class, num_point, num_person, in_channels, graph, num_timestep, cuda_=torch.cuda.is_available(), l1=L1, l2=L2, l3=L3, dropout=DROPOUT):
-        super(MarcSTGCN, self).__init__()
+class InceptionI3dGraph(nn.Module):
+    """Inception-v1 I3D architecture.
+    The model is introduced in:
+        Quo Vadis, Action Recognition? A New Model and the Kinetics Dataset
+        Joao Carreira, Andrew Zisserman
+        https://arxiv.org/pdf/1705.07750v1.pdf.
+    See also the Inception architecture, introduced in:
+        Going deeper with convolutions
+        Christian Szegedy, Wei Liu, Yangqing Jia, Pierre Sermanet, Scott Reed,
+        Dragomir Anguelov, Dumitru Erhan, Vincent Vanhoucke, Andrew Rabinovich.
+        http://arxiv.org/pdf/1409.4842v1.pdf.
+    """
 
-        self.graph = graph
+    # Endpoints of the model in order. During construction, all the endpoints up
+    # to a designated `final_endpoint` are returned in a dictionary as the
+    # second return value.
+    VALID_ENDPOINTS = (
+        'Conv3d_1a_7x7',
+        'MaxPool3d_2a_3x3',
+        'Conv3d_2b_1x1',
+        'Conv3d_2c_3x3',
+        'MaxPool3d_3a_3x3',
+        'Mixed_3b',
+        'Mixed_3c',
+        'MaxPool3d_4a_3x3',
+        'Mixed_4b',
+        'Mixed_4c',
+        'Mixed_4d',
+        'Mixed_4e',
+        'Mixed_4f',
+        'MaxPool3d_5a_2x2',
+        'Mixed_5b',
+        'Mixed_5c',
+        'Logits',
+        'Predictions',
+    )
 
-        A = self.graph.A
-        self.data_bn = nn.BatchNorm1d(num_person * in_channels * num_point)
-
-        weights_init(self.data_bn, bs=1)
-        layers = [ST_GCN_block(in_channels, 64, A, cuda_, residual=False, dropout=dropout)]
-        layers += [ST_GCN_block(64, 64, A, cuda_, dropout=dropout)] * (l1 - 1)
-        layers += [ST_GCN_block(64, 128, A, cuda_, stride=2, dropout=dropout)]
-        layers += [ST_GCN_block(128, 128, A, cuda_, dropout=dropout)] * (l2 - 1)
-        layers += [ST_GCN_block(128, 256, A, cuda_, stride=2, dropout=dropout)]
-        layers += [ST_GCN_block(256, 256, A, cuda_, dropout=dropout)] * (l3 - 1)
+    def __init__(self, num_class, num_point, num_person, in_channels, graph, spatial_squeeze=True, num_timesteps=100,
+                 final_endpoint='Logits', name='inception_i3d',  dropout_keep_prob=0.5, thw=(2,2,7)):
         
-        # print(layers)
-        # quit()
-        # layers = [ 
-        #     ST_GCN_block(in_channels, 64, A, cuda_, residual=False),
-        #     ST_GCN_block(64, 64, A, cuda_),
-        #     #  'layer3': ST_GCN_block(64, 64, A, cuda_),
-        #     ST_GCN_block(64, 64, A, cuda_),
-        #     ST_GCN_block(64, 128, A, cuda_, stride=2),
-        #     ST_GCN_block(128, 128, A, cuda_),
-        #     ST_GCN_block(128, 128, A, cuda_),
-        #     ST_GCN_block(128, 256, A, cuda_, stride=2),
-        #     ST_GCN_block(256, 256, A, cuda_),
-        #     ST_GCN_block(256, 256, A, cuda_)
-        # ]
-        layer_dict = {}
-        for i, l in enumerate(layers):
-            layer_dict[f'layer{i+1}'] = l
-
-        self.layers = nn.ModuleDict(layer_dict)
-
-        self.fc = nn.Linear(256, num_class * num_timestep)
-        weights_init(self.fc, bs=num_class * num_timestep)
-
-    def forward(self, x):
+        # num_class, num_point, num_person, in_channels, graph
+        """Initializes I3D model instance.
+        Args:
+          num_classes: The number of outputs in the logit layer (default 400, which
+              matches the Kinetics dataset).
+          spatial_squeeze: Whether to squeeze the spatial dimensions for the logits
+              before returning (default True).
+          final_endpoint: The model contains many possible endpoints.
+              `final_endpoint` specifies the last endpoint for the model to be built
+              up to. In addition to the output at `final_endpoint`, all the outputs
+              at endpoints up to `final_endpoint` will also be returned, in a
+              dictionary. `final_endpoint` must be one of
+              InceptionI3d.VALID_ENDPOINTS (default 'Logits').
+          name: A string (optional). The name of this module.
+        Raises:
+          ValueError: if `final_endpoint` is not recognized.
         """
-        X: Shape (batch, channels, time, nodes, people)
-        """
+        self.num_timesteps = num_timesteps
+
+        if final_endpoint not in self.VALID_ENDPOINTS:
+            raise ValueError('Unknown final endpoint %s' % final_endpoint)
+
+        super(InceptionI3dGraph, self).__init__()
+        t, h, w = thw
+        self._num_classes = num_class
+        self._spatial_squeeze = spatial_squeeze
+        self._final_endpoint = final_endpoint
+        self.logits = None
+
+        if self._final_endpoint not in self.VALID_ENDPOINTS:
+            raise ValueError('Unknown final endpoint %s' % self._final_endpoint)
+
+        self.end_points = {}
+        end_point = 'Conv3d_1a_7x7'
+        self.end_points[end_point] = Unit3D(in_channels=in_channels, output_channels=64, kernel_shape=[7, 7, 7],
+                                            stride=(2, 2, 2), padding=(3,3,3),  name=name+end_point)
+        if self._final_endpoint == end_point: return
         
+        end_point = 'MaxPool3d_2a_3x3'
+        self.end_points[end_point] = MaxPool3dSamePadding(kernel_size=[1, 3, 3], stride=(1, 2, 2),
+                                                             padding=0)
+        if self._final_endpoint == end_point: return
+        
+        end_point = 'Conv3d_2b_1x1'
+        self.end_points[end_point] = Unit3D(in_channels=64, output_channels=64, kernel_shape=[1, 1, 1], padding=0,
+                                       name=name+end_point)
+        if self._final_endpoint == end_point: return
+        
+        end_point = 'Conv3d_2c_3x3'
+        self.end_points[end_point] = Unit3D(in_channels=64, output_channels=192, kernel_shape=[3, 3, 3], padding=1,
+                                       name=name+end_point)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'MaxPool3d_3a_3x3'
+        self.end_points[end_point] = MaxPool3dSamePadding(kernel_size=[1, 3, 3], stride=(1, 2, 2),
+                                                             padding=0)
+        if self._final_endpoint == end_point: return
+        
+        end_point = 'Mixed_3b'
+        self.end_points[end_point] = InceptionModule(192, [64,96,128,16,32,32], name+end_point)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'Mixed_3c'
+        self.end_points[end_point] = InceptionModule(256, [128,128,192,32,96,64], name+end_point)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'MaxPool3d_4a_3x3'
+        self.end_points[end_point] = MaxPool3dSamePadding(kernel_size=[3, 3, 3], stride=(2, 2, 2),
+                                                             padding=0)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'Mixed_4b'
+        self.end_points[end_point] = InceptionModule(128+192+96+64, [192,96,208,16,48,64], name+end_point)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'Mixed_4c'
+        self.end_points[end_point] = InceptionModule(192+208+48+64, [160,112,224,24,64,64], name+end_point)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'Mixed_4d'
+        self.end_points[end_point] = InceptionModule(160+224+64+64, [128,128,256,24,64,64], name+end_point)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'Mixed_4e'
+        self.end_points[end_point] = InceptionModule(128+256+64+64, [112,144,288,32,64,64], name+end_point)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'Mixed_4f'
+        self.end_points[end_point] = InceptionModule(112+288+64+64, [256,160,320,32,128,128], name+end_point)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'MaxPool3d_5a_2x2'
+        self.end_points[end_point] = MaxPool3dSamePadding(kernel_size=[2, 2, 2], stride=(2, 2, 2),
+                                                             padding=0)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'Mixed_5b'
+        self.end_points[end_point] = InceptionModule(256+320+128+128, [256,160,320,32,128,128], name+end_point)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'Mixed_5c'
+        self.end_points[end_point] = InceptionModule(256+320+128+128, [384,192,384,48,128,128], name+end_point)
+        if self._final_endpoint == end_point: return
+
+        end_point = 'Logits'
+        self.avg_pool = nn.AvgPool3d(kernel_size=[t, h, w],
+                                     stride=(1, 1, 1))
+        self.dropout = nn.Dropout(dropout_keep_prob)
+        self.logits = Unit3D(in_channels=384+384+128+128, output_channels=self._num_classes * num_timesteps,
+                             kernel_shape=[1, 1, 1],
+                             padding=0,
+                             activation_fn=None,
+                             use_batch_norm=False,
+                             use_bias=True,
+                             name='logits')
+
+        self.build()
+
+
+    def replace_logits(self, num_classes):
+        self._num_classes = num_classes
+        self.logits = Unit3D(in_channels=384+384+128+128, output_channels=self._num_classes,
+                             kernel_shape=[1, 1, 1],
+                             padding=0,
+                             activation_fn=None,
+                             use_batch_norm=False,
+                             use_bias=True,
+                             name='logits')
+        
+    
+    def build(self):
+        for k in self.end_points.keys():
+            self.add_module(k, self.end_points[k])
+        
+    def forward(self, x):
         N, C, T, V, M = x.size()
-        x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T) # (batch, people * nodes * channels, times)
+        for end_point in self.VALID_ENDPOINTS:
+            if end_point in self.end_points:
+
+                x = self._modules[end_point](x) # use _modules to work with dataparallel
+                # quit()
+                # print(x.size())
+        # quit()
+        x = self.logits(self.dropout(self.avg_pool(x)))
+        if self._spatial_squeeze:
+            logits = x.squeeze(3).squeeze(3)
+            
+        # logits is batch X time X classes, which is what we want to work with
+        return softmax(logits[...,0].view(N, T, -1), dim=-1)
         
-        x = self.data_bn(x) # batchnorm
-        x = x.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V) # (batch * people, channels, times, nodes)
-        for i in range(len(self.layers)):
-            x = self.layers['layer' + str(i+1)](x)
-        # N*M,C,T,V
 
-        c_new = x.size(1) # infer new channel size
-        x = x.view(N, M, c_new, -1) # (batch, people, new_channel_size, times * nodes)
-        x = x.mean(3).mean(1) # Take mean across times*nodes and people
-        # return softmax(self.fc(x), dim=1) # in shape: (batch, new_channel_size)
-        return softmax(self.fc(x).view(N, T, -1), dim=-1) # in shape: (batch, times, num_classes)
+    def extract_features(self, x):
+        for end_point in self.VALID_ENDPOINTS:
+            if end_point in self.end_points:
+                x = self._modules[end_point](x)
+        return self.avg_pool(x)
+    
 
-class STGCN:
+
+class ShopLiftingInceptionClassifier:
     def __init__(self, ds=None, loss_fn=torch.nn.functional.cross_entropy, model_name=MODEL_NAME, weights_path=None, timesteps=None):
         
         torch.set_default_dtype(torch.float32)
@@ -265,7 +411,7 @@ class STGCN:
         if weights_path is not None:
             self.graph = create_ultralytics_graph()
             model_weights = torch.load(weights_path, map_location=device )
-            self.classifier = MarcSTGCN(2,17, 1, 2, self.graph, timesteps).to(device)
+            self.classifier = InceptionI3dGraph(2,17, 1, 2, self.graph, timesteps).to(device)
             self.classifier.load_state_dict(model_weights)
             print(f"Loaded model from {weights_path}")
             return
@@ -284,7 +430,7 @@ class STGCN:
 
         self.graph = MediapipeGraph(self.n_point, ds.in_edge)
 
-        # self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph).to(device)
+        # self.classifier = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph).to(device)
         # if not os.path.exists(model_name):
         #     os.makedirs(model_name)
         if LOAD_MODEL:
@@ -402,7 +548,8 @@ class STGCN:
         # print((self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, self.time_steps))
         # quit()
 
-        self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, self.time_steps, dropout=DROPOUT).to(device)        
+        self.classifier = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, dropout_keep_prob=(1-DROPOUT), thw=(t, h, w), num_timesteps=self.time_steps).to(device)    
+        # InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, dropout_keep_prob=(1-DROPOUT), thw=(t, h, w)).to(device)      # 
         param_size = 0
         for param in self.classifier.parameters():
             param_size += param.nelement() * param.element_size()
@@ -522,7 +669,8 @@ class STGCN:
             print(f"Best trial config: \t {best_trial.config}")
             print(f"Best Trial Final Validation Metrics: \t {best_trial.metrics_dataframe}")
 
-            best_trained_model = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, self.time_steps, dropout=best_trial.config["dropout"]).to(device)
+            best_trained_model = InceptionI3dGraph(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, self.time_steps, dropout=best_trial.config["dropout"]).to(device)
+            # self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, dropout_keep_prob=(1-DROPOUT), thw=(t, h, w)
 
             best_checkpoint = best_trial.get_best_checkpoint(metric="val_accuracy", mode="max")
 
