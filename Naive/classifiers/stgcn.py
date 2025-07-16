@@ -1,8 +1,10 @@
 """
 Modified based on: https://github.com/open-mmlab/mmskeleton
 """
+import sys
 import os
 import glob
+from functools import partial
 import math
 import numpy as np
 import torch
@@ -18,20 +20,36 @@ from torchmetrics import Accuracy, Precision, Recall
 import seaborn as sns
 import matplotlib.pyplot as plt
 from torch.nn.functional import softmax
+from ray import train
+from ray import tune
+import ray
+from ray.tune.tuner import Tuner
+from ray.train import Checkpoint, get_checkpoint
+from ray.tune.schedulers import ASHAScheduler
+import ray.cloudpickle as pickle
+from pathlib import Path
+import tempfile
+import asyncio
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.system("rm -rf runs/*")
+os.system("kill $(ps -e | grep 'tensorboard' | awk '{print $1}')")
+async def start_tensorboard(direc):
+    await asyncio.create_subprocess_shell("tensorboard --port 6006 --logdir=runs/" + direc)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 SAVE_MODEL = 1
 LOAD_MODEL = True
 MODEL_NAME = "model_checkpoints"
-
-DROPOUT = 0.25
-WEIGHT_DECAY = 1e-5
+TUNE = False
+DROPOUT = 0.75
+WEIGHT_DECAY = 1e-3
 
 BATCH_SIZE=32
 
-EPOCHS = 100
-LR = 1e-5
+EPOCHS = 20
+LR = 1e-4
 
 def force_cudnn_initialization():
     if device == "cuda":
@@ -144,10 +162,10 @@ class TemporalConvolution(nn.Module):
 
 
 class ST_GCN_block(nn.Module):
-    def __init__(self, in_channels, out_channels, A, cuda_=False, stride=1, residual=True):
+    def __init__(self, in_channels, out_channels, A, cuda_=False, stride=1, residual=True, dropout=DROPOUT):
         super(ST_GCN_block, self).__init__()
 
-        self.gcn = GraphConvolution(in_channels, out_channels, A, cuda_)
+        self.gcn = GraphConvolution(in_channels, out_channels, A, cuda_, dropout=dropout)
         self.tcn = TemporalConvolution(out_channels, out_channels, stride=stride)
         self.relu = nn.ReLU()
         if not residual:
@@ -167,7 +185,7 @@ class ST_GCN_block(nn.Module):
 
 
 class MarcSTGCN(nn.Module):
-    def __init__(self, num_class, num_point, num_person, in_channels, graph, cuda_=torch.cuda.is_available()):
+    def __init__(self, num_class, num_point, num_person, in_channels, graph, cuda_=torch.cuda.is_available(), l1=3, l2=3, l3=3, dropout=DROPOUT):
         super(MarcSTGCN, self).__init__()
 
         self.graph = graph
@@ -176,20 +194,27 @@ class MarcSTGCN(nn.Module):
         self.data_bn = nn.BatchNorm1d(num_person * in_channels * num_point)
 
         weights_init(self.data_bn, bs=1)
+        layers = [ST_GCN_block(in_channels, 64, A, cuda_, residual=False, dropout=dropout)]
+        layers += [ST_GCN_block(64, 64, A, cuda_, dropout=dropout)] * (l1 - 1)
+        layers += [ST_GCN_block(64, 128, A, cuda_, stride=2, dropout=dropout)]
+        layers += [ST_GCN_block(128, 128, A, cuda_, dropout=dropout)] * (l2 - 1)
+        layers += [ST_GCN_block(128, 256, A, cuda_, stride=2, dropout=dropout)]
+        layers += [ST_GCN_block(256, 256, A, cuda_, dropout=dropout)] * (l3 - 1)
         
-
-        layers = [ 
-            ST_GCN_block(in_channels, 64, A, cuda_, residual=False),
-            ST_GCN_block(64, 64, A, cuda_),
-            #  'layer3': ST_GCN_block(64, 64, A, cuda_),
-            ST_GCN_block(64, 64, A, cuda_),
-            ST_GCN_block(64, 128, A, cuda_, stride=2),
-            ST_GCN_block(128, 128, A, cuda_),
-            ST_GCN_block(128, 128, A, cuda_),
-            ST_GCN_block(128, 256, A, cuda_, stride=2),
-            ST_GCN_block(256, 256, A, cuda_),
-            ST_GCN_block(256, 256, A, cuda_)
-        ]
+        # print(layers)
+        # quit()
+        # layers = [ 
+        #     ST_GCN_block(in_channels, 64, A, cuda_, residual=False),
+        #     ST_GCN_block(64, 64, A, cuda_),
+        #     #  'layer3': ST_GCN_block(64, 64, A, cuda_),
+        #     ST_GCN_block(64, 64, A, cuda_),
+        #     ST_GCN_block(64, 128, A, cuda_, stride=2),
+        #     ST_GCN_block(128, 128, A, cuda_),
+        #     ST_GCN_block(128, 128, A, cuda_),
+        #     ST_GCN_block(128, 256, A, cuda_, stride=2),
+        #     ST_GCN_block(256, 256, A, cuda_),
+        #     ST_GCN_block(256, 256, A, cuda_)
+        # ]
         layer_dict = {}
         for i, l in enumerate(layers):
             layer_dict[f'layer{i+1}'] = l
@@ -203,8 +228,7 @@ class MarcSTGCN(nn.Module):
         """
         X: Shape (batch, channels, time, nodes, people)
         """
-        # n -> batch size, C -> channels 3, T -> num frames, V -> num joints, M -> num persons
-      
+        
         N, C, T, V, M = x.size()
         x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T) # (batch, people * nodes * channels, times)
         
@@ -233,28 +257,28 @@ class STGCN:
         self.n_classes = ds.n_classes
         self.class_names = ds.classes
         self.n_point = ds.n_point
-        self.num_person = 1
+        self.num_person = ds.num_person
         self.in_channels = ds.in_channels
         self.loss_fn = loss_fn
 
         self.graph = MediapipeGraph(self.n_point, ds.in_edge)
 
-        self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph).to(device)
-        if not os.path.exists(model_name):
-            os.makedirs(model_name)
-        if LOAD_MODEL:
-            if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}")):
-                print("No models found, creating a new one")
-            elif not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}")):
-                print("No models found, creating a new one")
-            else:
-                model_names = os.listdir(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}"))
-                if len(model_names) == 0:
-                    print("No models found, creating a new one")
-                else:
-                    model_files = os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}", model_names[-1])#os.path.join(model_name, model_names[-1])
-                    print(f"Loading model from {model_files}")
-                    self.classifier.load_state_dict(torch.load(model_files))
+        # self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph).to(device)
+        # if not os.path.exists(model_name):
+        #     os.makedirs(model_name)
+        # if LOAD_MODEL:
+        #     if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}")):
+        #         print("No models found, creating a new one")
+        #     elif not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}")):
+        #         print("No models found, creating a new one")
+        #     else:
+        #         model_names = os.listdir(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}"))
+        #         if len(model_names) == 0:
+        #             print("No models found, creating a new one")
+        #         else:
+        #             model_files = os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}", model_names[-1])#os.path.join(model_name, model_names[-1])
+        #             print(f"Loading model from {model_files}")
+        #             self.classifier.load_state_dict(torch.load(model_files))
 
         self.tracking_metrics = {
             # "precision": lambda x,y: precision(x, y, 'multilabel', num_classes=self.n_classes),
@@ -272,7 +296,9 @@ class STGCN:
 
         
 
-    def _train_step(self, sample, optimizer, metrics, val_sample=None):
+    def _train_step(self, sample, optimizer, metrics, val_sample=None, classifier=None):
+        if classifier is None:
+            classifier = self.classifier
         metrics["scalar"] = {}
         if val_sample is not None:
             val_metrics = {}
@@ -282,7 +308,7 @@ class STGCN:
         y = y.to(device)
         # print(y.size())
         optimizer.zero_grad()
-        outputs = self.classifier(X)
+        outputs = classifier(X)
         predictions = torch.nn.functional.one_hot(outputs.argmax(axis=1), num_classes=self.n_classes)
         loss = self.loss_fn(outputs, y)
 
@@ -306,14 +332,16 @@ class STGCN:
                     
         return metrics
 
-    def _val_step(self, sample, val_metrics):
+    def _val_step(self, sample, val_metrics, classifier=None):
+        if classifier is None:
+            classifier = self.classifier
         val_metrics["scalar"] = {}
         X, y = sample
         X = X.to(device)
         y = y.to(device)
         
         with torch.no_grad():
-            val_out = self.classifier(X)
+            val_out = classifier(X)
             predictions = torch.nn.functional.one_hot(val_out.argmax(axis=1), num_classes=self.n_classes)
             val_loss = self.loss_fn(val_out, y)
             val_metrics["scalar"]["val_loss"] = val_loss.item()
@@ -335,112 +363,203 @@ class STGCN:
         return val_metrics
 
 
-    def train(self, test_split=0.01, val_split=0.3, optimizer=None, lr=LR, momentum=0.9, epochs=EPOCHS, batch_size=BATCH_SIZE):
-        # train_samples = int((1 - test_split) * len(self.ds))
-        # test_samples = int(len(self.ds) - train_samples)
-        # val_samples = int(val_split * train_samples)
-        # train_samples = int(train_samples - val_samples)
-        # self.train_set, self.test_set, self.val_set = torch.utils.data.random_split(self.ds, [train_samples, test_samples, val_samples])
-        # self.val_set = self.val_set.to(device)
+    def train(self,  lr=LR, momentum=0.9, epochs=EPOCHS, batch_size=BATCH_SIZE):
+        
+        self.train_set.to(device)
+        self.val_set.to(device)
 
-        # quit()
-        self.train_set = DataLoader(self.train_set, batch_size=batch_size, shuffle=False)
-        self.val_set = DataLoader(self.val_set, batch_size=batch_size, shuffle=False)
-        # print(len(self.train_set))
+        t = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[2] / 2) / 2) / 2)
+        h = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[3] / 2) / 2) / 2) // 2
+        w = math.ceil(math.ceil(math.ceil(self.train_set.ds.X.size()[4] / 2) / 2) / 2)
+        # print((t,h,w))
         # quit()
 
+        self.classifier = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, dropout=DROPOUT).to(device)        
+        param_size = 0
+        for param in self.classifier.parameters():
+            param_size += param.nelement() * param.element_size()
+        buffer_size = 0
+        for buffer in self.classifier.buffers():
+            buffer_size += buffer.nelement() * buffer.element_size()
 
-        if optimizer is None:
-            # optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr, momentum=momentum)
-            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
-
-        writer = SummaryWriter()
-
-        # for epoch in range(epochs):
-        #     train_iter = iter(self.train_set)
-        #     curr_sample = next(train_iter)
-        #     while curr_sample is not None:
-        #         self._train_step(curr_sample, optimizer)
-        #         curr_sample = next(train_iter)
-        prev_metrics = 0
-
-        print(f"Training with {self.time_steps} time steps and {self.n_classes} classes")
-        print(f"Training on device {device}")
-        for epoch in range(epochs):
-            print()
-            print(f"Epoch #{epoch + 1}: ")
-            train_iter = tqdm(iter(self.train_set))
-            scalar_metrics = {"train":{},
-                              "val":{}}
-            train_metrics = {"scalar": {}, "image": {}}
-            for idx, curr_sample in enumerate(train_iter):
-                train_metrics = self._train_step(curr_sample, optimizer, train_metrics)
-                for k in train_metrics["scalar"].keys():
-                    if k not in scalar_metrics["train"].keys():
-                        scalar_metrics["train"][k] = 0
+        total_size = (param_size + buffer_size) / 1024**2
+        print(f"Model Size: {total_size:.2f} MB")
+        
+        # def ray_train_func(train_iter, val_set, optimizer, train_metrics, val_metrics): 
+                
+            # for idx, val_sample in enumerate(val_set):
+            #     val_metrics = self._val_step(val_sample, val_metrics)
+        
+        # @ray.remote
+        def tune_hyperparams(config, data=None):
+            classifier = ray.get(self.classifier)
+            optimizer = torch.optim.Adam(classifier.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
+            checkpoint = get_checkpoint()
+            if checkpoint:
+                with checkpoint.as_directory() as checkpoint_dir:
+                    data_path = Path(checkpoint_dir)
+                    with open(data_path, "rb") as fp:
+                        checkpoint_state = pickle.load(fp)
+                    start_epoch = checkpoint_state["epoch"]
+                    classifier.load_state_dict(checkpoint_state["net_state_dict"])
+                    optimizer.load_state_dict(checkpoint_state["optimizer_state_dict"])
+            else:
+                start_epoch = 0
+            
+            # if device == "cuda":
+            #     classifier = nn.DataParallel(classifier, device_ids=[0], output_device=0)
+            classifier.to(device)
+                       
+           
+            train_set, val_set = data
+            for epoch in range(start_epoch, start_epoch + epochs):
+                print()
+                print(f"Epoch #{epoch + 1}: {self.num_timesteps} Timesteps")
+                
+                train_metrics = {"scalar": {}, "image": {}}
+                val_metrics = {"scalar": {}, "image": {}}
+                
+                for idx, curr_sample in enumerate(train_set):
+                    cs = ray.get(curr_sample)
+                    train_metrics = self._train_step(cs, optimizer, train_metrics, classifier=classifier)
+                    del cs
+                for idx, val_sample in enumerate(val_set):
+                    vs = ray.get(val_sample)
+                    val_metrics = self._val_step(vs, val_metrics, classifier=classifier)
+                    del vs
+        
+                checkpoint_data = {
+                    "epoch":epoch,
+                    "net_state_dict": classifier.state_dict(),
+                    "optimizer_state_dict":optimizer.state_dict()
                     
-                    scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(train_iter)
-                
-                train_iter.set_postfix(train_metrics["scalar"])
-            sns.heatmap(train_metrics["image"]["conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
-            plt.xlabel("Predicted")
-            plt.ylabel("True")
-            writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
-            plt.close()
-            print()
-            print("Validation:")
-            val_metrics = {"scalar": {}, "image": {}}
-            val_iter = tqdm(iter(self.val_set))
-            for idx, val_sample in enumerate(val_iter):
-                val_metrics = self._val_step(val_sample, val_metrics)
-                for k in val_metrics["scalar"].keys():
-                    if k not in scalar_metrics["val"].keys():
-                        scalar_metrics["val"][k] = 0
-                    scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(val_iter)
-                val_iter.set_postfix(val_metrics["scalar"])
+                }
+                with tempfile.TemporaryDirectory() as checkpoint_dir:
+                    data_path = Path(checkpoint_dir) / "data.pkl"
+                    with open(data_path, "wb") as fp:
+                        pickle.dump(checkpoint_data, fp)
+                    checkpoint = Checkpoint.from_directory(checkpoint_dir)
+                    # print(val_metrics)
+                    tune.report(val_metrics['scalar'], checkpoint=checkpoint)
 
-            
-            
-            if SAVE_MODEL is not None:
-                if (epoch + 1) % SAVE_MODEL == 0:
-                    curr_metrics = np.sum(list(scalar_metrics["val"].values()))
-                    if False:#curr_metrics < prev_metrics:
-                        print("Current Metrics not as good, skipping")
-                    else:
-                        prev_metrics = curr_metrics
-                        m_name = f"epoch_{epoch + 1}"
-                        for k in scalar_metrics["val"].keys():
-                            m_name += f"_{k}_{scalar_metrics['val'][k]:.2f}"
-                        if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}")):
-                            os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}"))
-                        if not os.path.exists(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}")):
-                            os.makedirs(os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}"))
-                        filename = os.path.join(self.model_name, f"timesteps_{self.time_steps}", f"classes_{self.n_classes}", m_name+".pt")
-                        print(f"Saving model to {filename}")
-                        torch.save(self.classifier.state_dict(), filename)
-                
-            # fig = plt.figure()
-            # image = torch.image.decode_png(fig.getvalue(), channels=4)
+        if TUNE:
+            ray.init(num_cpus=4, num_gpus=1, include_dashboard=True)
+            self.classifier = ray.put(self.classifier)
+            config = {
+                "lr": tune.loguniform(1e-5, 1e-1),
+                "dropout": tune.loguniform(1e-1, 0.9),
+                "weight_decay": tune.loguniform(1e-5, 1e-1),
+            }
+            # test_config = {
+            #     "lr": 1e-5,
+            #     "dropout": 0.25,
+            #     "weight_decay": 1e-5
+            # }
+            train_ray = [None] * self.train_set.num_batches
+            for i in range(self.train_set.num_batches):
+                train_ray[i] = ray.put(self.train_set[i])
 
-            sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
-            plt.xlabel("Predicted")
-            plt.ylabel("True")
-            # plt.imshow(hm)
+            val_ray = [None] * self.val_set.num_batches
+            for i in range(self.val_set.num_batches):
+                val_ray[i] = ray.put(self.val_set[i])
+
+            # tune_hyperparams(config=test_config, data=(train_ray, val_ray))
             # quit()
-            # hm = fig
-            # img_flat = np.frombuffer(fig.canvas.draw().tostring_rgb(), dtype='uint8')
-            # image = img_flat.reshape(*reversed(img_flat.get_width_height), 3)
-            writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)
-            plt.close()
-            print("##################")
-            for k in scalar_metrics["train"].keys():
-                v = scalar_metrics["train"][k]
-                v_val = scalar_metrics["val"]["val_" + k]
-                print(f"{k.capitalize()}: {v:.3f}")
-                print(f"{('val_' + k).capitalize()}: {v_val:.3f}")
+
+
+            tuner = Tuner(
+                trainable=tune.with_parameters(tune.with_resources(tune_hyperparams, {"gpu": 1}), data=(train_ray, val_ray)),
+                param_space=config,
+                tune_config=tune.TuneConfig(
+                    metric="val_loss",
+                    mode="min",
+                    num_samples=30,
+                    scheduler=tune.schedulers.ASHAScheduler(time_attr='epoch', max_t=30)
+                )
+                # run_config=tune.RunConfig(
+                #     name="tune_hyperparams",
+                #     # storage_path="C:\\\\Users\\joshua.vanstaden\\Documents\\Models\\phd_gait_methods\\Naive",
+                # )
+            )
+            result = tuner.fit()
+
+            # result = tune.run(
+            #     partial(tune_hyperparams, data_dir="tuning"),
+            #     resources_per_trial={"cpu": 1, "gpu": 1},
+            #     config=config,
+            #     scheduler=scheduler
+            # )
+            print(dir(result.get_best_result(metric="val_loss", mode="min")))
+            best_trial = result.get_best_result()
+            print(f"Best trial config: \t {best_trial.config}")
+            print(f"Best Trial Final Validation Metrics: \t {best_trial.metrics_dataframe}")
+
+            best_trained_model = MarcSTGCN(self.n_classes, self.n_point, self.num_person, self.in_channels, self.graph, dropout=best_trial.config["dropout"]).to(device)
+
+            best_checkpoint = best_trial.get_best_checkpoint(metric="val_accuracy", mode="max")
+
+            with best_checkpoint.as_directory() as checkpoint_dir:
+                data_path = Path(checkpoint_dir) / "data.pkl"
+                with open(data_path, "rb") as fp:
+                    best_checkpoint_data = pickle.load(fp)
+
+                best_trained_model.load_state_dict(best_checkpoint_data["net_state_dict"])
+        else:
+            writer = SummaryWriter()
+            asyncio.run(start_tensorboard(os.listdir("runs")[-1]))
+          
+            optimizer = torch.optim.Adam(self.classifier.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+            for epoch in range(0, epochs):
+                # print(self.val_set.ds.X.size())
+                # quit()
+
+                print()
+                print(f"Epoch #{epoch + 1}: ")
+                scalar_metrics = {"train":{},
+                                "val":{}}
+                
+                val_metrics = {"scalar": {}, "image": {}}
+                # print(self.val_set.X[0].size())
+                # quit()
+                val_iter = iter(self.val_set)
+                for idx, val_sample in enumerate(val_iter):
+                    # print(val_sample[0].size())
+                    # quit()
+                    val_metrics = self._val_step(val_sample, val_metrics)
+                    for k in val_metrics["scalar"].keys():
+                        if k not in scalar_metrics["val"].keys():
+                            scalar_metrics["val"][k] = 0
+                        scalar_metrics["val"][k] += val_metrics["scalar"][k] / len(self.val_set.X)
+                train_iter = iter(self.train_set)
                 print("##################")
-                writer.add_scalars(k.capitalize(), {"train": v,
-                                                    "validation":v_val
-                }, epoch)
+                for k in scalar_metrics["val"].keys():
+                
+                    print(f"{k.capitalize()}: {scalar_metrics['val'][k]:.3f}")
+                print("##################")
+                writer.add_scalars("Validation", scalar_metrics["val"], epoch)
+                # print("GOT HERE")
+                # quit()
 
+                loop = tqdm(enumerate(train_iter))
+                train_metrics = {"scalar": {}, "image": {}}
+                for idx, curr_sample in loop:
+                    train_metrics = self._train_step(curr_sample, optimizer, train_metrics)
+                    for k in train_metrics["scalar"].keys():
+                        if k not in scalar_metrics["train"].keys():
+                            scalar_metrics["train"][k] = 0
+                        
+                        scalar_metrics["train"][k] += train_metrics["scalar"][k] / len(self.train_set.X)
+                    # train.report(scalar_metrics["train"])
+                    loop.set_postfix(train_metrics["scalar"])
+                writer.add_scalars("Training", scalar_metrics["train"], epoch)
+                sns.heatmap(train_metrics["image"]["conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
+                plt.xlabel("Predicted")
+                plt.ylabel("True")
+                writer.add_figure("Training Confusion Matrix", plt.gcf(), epoch)
+                plt.close()
 
+                
+                sns.heatmap(val_metrics["image"]["val_conf_mat"], annot=False, xticklabels=self.class_names, yticklabels=self.class_names)
+                plt.xlabel("Predicted")
+                plt.ylabel("True")
+                writer.add_figure("Validation Confusion Matrix", plt.gcf(), epoch)

@@ -140,7 +140,10 @@ def read_from_cached_file(filename, min_samples=2):
 def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=256):
     # TODO
     
-    frames = os.listdir(filename)
+    try:
+        frames = os.listdir(filename)
+    except Exception as e:
+        return None
     # bounding_boxes = yolo_model([os.path.join(filename, f) for f in frames], save=False, verbose=False)
     
 
@@ -150,10 +153,16 @@ def get_kp_from_file(filename, kp_dict, min_frames = 2, im_height=256, im_width=
 
       
         found_frame = False
-        results_generator = yolo_model(source=os.path.join(filename, frame), show=False, conf=0.3, save=False, stream=True, verbose=False)
+        # print(os.path.join(filename, frame))
+        # quit()
+        try:
+            results_generator = yolo_model(source=os.path.join(filename, frame), show=False, conf=0.3, save=False, stream=False, verbose=False)
+        except Exception as e:
+            continue
         for i in range(2):
             for k in kp_dict.keys():
                 curr_frame.append([i, k, 0, 0])
+        
         for i, res in enumerate(results_generator):
             if i >= 2:
                 break
@@ -272,6 +281,7 @@ class HMDBDataset(GenericGaitDataset):
         # self.q = self.quality_matrices()
 
         self.y_raw = self.y.copy()
+        self.y = torch.Tensor(self.y)
         # self.y = self.to_one_hot()
         # self.X = self.get_position_vectors()
         self.X = self.adjust_input_data(self.X)
@@ -680,9 +690,12 @@ class HMDBDataset(GenericGaitDataset):
             print("#################################")
             print(f"Class {class_idx + 1} / {len(classe_names)}")
             print("#################################")
-            vids = os.listdir(
-                os.path.join(self.directory, class_name)
-            )
+            try:
+                vids = os.listdir(
+                    os.path.join(self.directory, class_name)
+                )
+            except Exception as e:
+                continue
             
             if max_samples is None:
                 maximum_num_samples = int(len(vids))

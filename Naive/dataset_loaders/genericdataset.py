@@ -23,8 +23,6 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 
 import matplotlib.animation as animation
 from celluloid import Camera
-import mediapipe as mp
-mp_pose = mp.solutions.pose
 
 def cell_callback_factory(num_frames):
 
@@ -105,7 +103,6 @@ class GenericGaitDataset:
         if self.generate_test_video is not None and self.generate_test_video < 0:
             quit()
 
-        self.X, self.y = self.get_individual_steps()
         self.interpolate_by_time()
         
         self.n_classes = len(np.unique(self.y))
