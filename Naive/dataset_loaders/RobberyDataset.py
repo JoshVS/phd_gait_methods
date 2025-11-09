@@ -611,7 +611,7 @@ class RobberyDataset(GenericGaitDataset):
         for i in loop:
             curr_class = self.y[i]
             curr_vid_len = len(self.X[i][0])
-            if self.max_samples_per_video < (curr_vid_len - min_frames):
+            if self.max_samples_per_video is not None and self.max_samples_per_video < (curr_vid_len - min_frames):
                 for j in range(0, curr_vid_len - min_frames, (curr_vid_len - min_frames)//self.max_samples_per_video):
                     new_x.append([])            
                     new_y.append(curr_class)

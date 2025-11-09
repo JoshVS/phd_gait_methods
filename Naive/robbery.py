@@ -3,7 +3,36 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 # from copy_dataset_loaders.CASIA_dataset import CASIADataset
 from dataset_loaders.RobberyDataset import RobberyDataset
-import dataset_loaders.ShopLiftingDataset
+
+import sys
+
+def get_deep_size(obj, seen=None):
+    """Recursively calculates the deep size of an object in bytes."""
+    if seen is None:
+        seen = set()
+
+    obj_id = id(obj)
+    if obj_id in seen:
+        return 0  # Object already counted
+
+    seen.add(obj_id)
+    size = sys.getsizeof(obj)
+
+    if isinstance(obj, dict):
+        size += sum(get_deep_size(v, seen) for v in obj.values())
+        size += sum(get_deep_size(k, seen) for k in obj.keys())
+    elif isinstance(obj, (list, tuple, set, frozenset)):
+        size += sum(get_deep_size(item, seen) for item in obj)
+    elif hasattr(obj, '__dict__'):  # Custom objects
+        size += get_deep_size(obj.__dict__, seen)
+    elif hasattr(obj, '__slots__'):  # Objects with __slots__
+        for slot in obj.__slots__:
+            try:
+                size += get_deep_size(getattr(obj, slot), seen)
+            except AttributeError:
+                pass # Slot might not be set
+
+    return size
 
 SKIP_FRAMES = 5
 
@@ -71,15 +100,13 @@ class TrainValDataset(Dataset):
         return self.X[idx], self.y[idx]
 
 my_ds = RobberyDataset(generate_test_video=None, 
-                    max_samples=5,
-                    max_classes=None, 
-                    min_samples = 0,  
-                    num_timesteps=300,
+                    max_samples=0.25,
+                    num_timesteps=30,
                     skip_frames=SKIP_FRAMES,
                     max_people=2,
-                    max_samples_per_video=50)
-
-
+                    max_samples_per_video=150)
+print(f"Dataset size: {get_deep_size(my_ds)/1e9} GB")
+quit()
 
 VAL_SIZE = 0.3
 X_train, X_val, y_train, y_val = train_test_split(my_ds.X, my_ds.y, test_size=VAL_SIZE, shuffle=True, stratify=my_ds.stratify_y)
