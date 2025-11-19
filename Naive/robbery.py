@@ -108,6 +108,10 @@ my_ds = RobberyDataset(generate_test_video=None,
 # print(f"Dataset size: {get_deep_size(my_ds)/1e9} GB")
 # quit()
 
+# SPLIT DATASET MANUALLY BATCHED
+num_samples = my_ds.total_samples
+num_pickled_batches = my_ds.num_batches
+
 VAL_SIZE = 0.3
 X_train, X_val, y_train, y_val = train_test_split(my_ds.X, my_ds.y, test_size=VAL_SIZE, shuffle=True, stratify=my_ds.stratify_y)
 train = TrainValDataset(my_ds, X_train, y_train)
