@@ -520,15 +520,35 @@ class RobberyDataset(GenericGaitDataset):
 
         
 
-    def n_skel(self, streaming=True):
+    def n_skel(self, streaming=False):
         # Shape (N, M, T, K, 2)
-        loop = tqdm(range(len(self.X)))
-        for i in loop:
-            for j in range(len(self.X[i])):
-                for k in range(len(self.X[i][j])):
-                    self.X[i][j][k] = normalize_skeleton(self.X[i][j][k])
-            loop.set_postfix()
-        return self.X
+        if streaming:
+            loop = tqdm(range(len(os.listdir(self.pickle_reshaped_dir))))
+            for i in loop:
+                if not os.path.exists(os.path.join(self.directory, "pickled_objects", "normalized", f"{self.video_filenames[i]}")):
+                    with open(os.path.join(self.pickle_reshaped_dir, f"{self.video_filenames[i]}"), "rb") as infile:
+                        loaded_data = pickle.load(infile)
+                    skel_data = loaded_data["tmp_vids"] 
+                    class_num = loaded_data["tmp_classes"]               
+                    for j in range(len(skel_data)):
+                        for k in range(len(skel_data[j])):
+                            skel_data[j][k] = normalize_skeleton(skel_data[j][k])
+                    with open(os.path.join(self.directory, "pickled_objects", "normalized", f"{self.video_filenames[i]}"), "wb") as outfile:
+                        pickle.dump({
+                            "tmp_vids": skel_data,
+                            "tmp_classes": class_num
+                        }, outfile)
+                loop.set_postfix()
+                self.pickle_normalized_dir = os.path.join(self.directory, "pickled_objects", "normalized")
+                
+        else:
+            loop = tqdm(range(len(self.X)))
+            for i in loop:
+                for j in range(len(self.X[i])):
+                    for k in range(len(self.X[i][j])):
+                        self.X[i][j][k] = normalize_skeleton(self.X[i][j][k])
+                loop.set_postfix()
+            return self.X
 
     def show_video(self, i, include_centroids=False, max_frames=200, outfile = "plots.gif"):
         # print(self.classes, self.video_filenames)
