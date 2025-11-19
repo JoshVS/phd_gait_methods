@@ -416,7 +416,7 @@ class RobberyDataset(GenericGaitDataset):
         if self.directory is not None:
             print()
             print("RESHAPING SKELETONS")
-            self.X = self.reshape_skeletons()
+            self.reshape_skeletons()
             print()
             print("NORMALIZING SKELETONS")
             self.X = self.n_skel()
@@ -665,12 +665,20 @@ class RobberyDataset(GenericGaitDataset):
         if skel_data is None:
             loop = tqdm(range(len(os.listdir(self.pickle_cache_dir))))
             for i in loop:
-                with open(os.path.join(self.pickle_cache_dir, f"{self.video_filenames[i]}"), "rb") as infile:
-                    loaded_data = pickle.load(infile)
-                skel_data = loaded_data["tmp_vids"]                
-                reshaped_data.extend(self._reshape_curr_skel(skel_data, unmash_kp=unmash_kp))
+                if not os.path.exists(os.path.join(self.directory, "pickled_objects", "reshaped", f"{self.video_filenames[i]}")):
+                    with open(os.path.join(self.pickle_cache_dir, f"{self.video_filenames[i]}"), "rb") as infile:
+                        loaded_data = pickle.load(infile)
+                    skel_data = loaded_data["tmp_vids"] 
+                    class_num = loaded_data["tmp_classes"]               
+                    with open(os.path.join(self.directory, "pickled_objects", "reshaped", f"{self.video_filenames[i]}"), "wb") as outfile:
+                        pickle.dump({
+                            "tmp_vids": self._reshape_curr_skel(skel_data, unmash_kp=unmash_kp),
+                            "tmp_classes": class_num
+                        }, outfile)
+                
         else:
             return self.reshape_curr_skel(skel_data, unmash_kp=unmash_kp)
+        self.pickle_reshaped_dir = os.path.join(self.directory, "pickled_objects", "reshaped")
         
 
     def create_file_data(self, kp_dict, max_samples, max_classes):
