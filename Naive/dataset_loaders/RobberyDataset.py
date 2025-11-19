@@ -419,10 +419,8 @@ class RobberyDataset(GenericGaitDataset):
             self.reshape_skeletons()
             print()
             print("NORMALIZING SKELETONS")
-            self.X = self.n_skel()
+            self.n_skel()
             
-        
-            self.y  = self.labels
 
         if self.generate_test_video is not None:
             self.show_video(self.generate_test_video)
@@ -433,21 +431,7 @@ class RobberyDataset(GenericGaitDataset):
             print("INTERPOLATING BY TIME")
             self.interpolate_by_time()
             # self.adjust_classes(0.1)
-            self.stratify_y = self.y.copy()
-            y_unique, counts = np.unique(self.y, return_counts=True)
-            plt.figure()
-            plt.bar(self.classes, counts)
-            plt.xticks(rotation=90)
-            plt.savefig("class_dist.png")
-            plt.close()
 
-
-        
-            self.n_classes = len(np.unique(self.y))
-            self.y = self.convert_to_one_hot()
-        
-            self.y_raw = self.y.copy()
-            self.y = torch.Tensor(self.y)
             self.X = self.adjust_input_data(self.X)
             print("DONE")
 
@@ -626,30 +610,87 @@ class RobberyDataset(GenericGaitDataset):
 
 
     def interpolate_by_time(self, convert_to_numpy=True):
+        self.total_samples = 0
         min_frames = self.num_timesteps * self.skip_frames
-        new_x = []
-        new_y = []
-        loop = tqdm(range(len(self.X)))
-        for i in loop:
-            curr_class = self.y[i]
-            curr_vid_len = len(self.X[i][0])
-            if self.max_samples_per_video is not None and self.max_samples_per_video < (curr_vid_len - min_frames):
-                for j in range(0, curr_vid_len - min_frames, (curr_vid_len - min_frames)//self.max_samples_per_video):
-                    new_x.append([])            
-                    new_y.append(curr_class)
-                    for k in range(self.max_people):
-                        new_x[-1].append(self.X[i][k][j:j + min_frames:self.skip_frames])
-            else:
-                for j in range(curr_vid_len - min_frames):
-                    new_x.append([])            
-                    new_y.append(curr_class)
-                    for k in range(self.max_people):
-                        new_x[-1].append(self.X[i][k][j:j + min_frames:self.skip_frames])
-            
-            loop.set_postfix()
+        outer_loop = tqdm(range(len(os.listdir(self.pickle_normalized_dir))), desc="Time Interpolating Skeletons")
+        if os.path.exists(os.path.join(self.directory, "pickled_objects", "time_interpolated")):
+            os.rmdir(os.path.join(self.directory, "pickled_objects", "time_interpolated"))
+        os.makedirs(os.path.join(self.directory, "pickled_objects", "time_interpolated"))
+        for i in outer_loop:
+            new_x = []
+            new_y = [[0] * self.n_classes]
+            with open(os.path.join(self.pickle_normalized_dir, f"{self.video_filenames[i]}"), "rb") as infile:
+                loaded_data = pickle.load(infile)
+            X = loaded_data["tmp_vids"] 
+            y = loaded_data["tmp_classes"]
+            num_loaded = 0
+            self.num_batches = 0
+            for i in range(len(X)):
+                curr_class = y
+                curr_vid_len = len(self.X[i][0])
+                if self.max_samples_per_video is not None and self.max_samples_per_video < (curr_vid_len - min_frames):
+                    for j in range(0, curr_vid_len - min_frames, (curr_vid_len - min_frames)//self.max_samples_per_video):
+                        if num_loaded == self.pickle_batch:
+                            if convert_to_numpy:
+                                new_x = np.array(new_x, dtype=np.float32)
+                                new_y = np.array(new_y, dtype=np.int32)
+                            with open(os.path.join(self.directory, "pickled_objects", "time_interpolated", f"batch_{self.num_batches}"), "wb") as outfile:
+                                pickle.dump({
+                                    "X": new_x,
+                                    "y": new_y
+                                }, outfile)
+                            new_x = []
+                            new_y = []
+                            num_loaded = 0
+                            self.num_batches += 1
+
+                        new_x.append([])            
+                        to_y = [0] * self.n_classes
+                        to_y[curr_class] = 1
+                        new_y.append(to_y)
+                        self.total_samples += 1
+                        num_loaded += 1
+                        for k in range(self.max_people):
+                            new_x[-1].append(self.X[i][k][j:j + min_frames:self.skip_frames])
+                else:                    
+                    for j in range(curr_vid_len - min_frames):
+                        if num_loaded == self.pickle_batch:
+                            if convert_to_numpy:
+                                new_x = np.array(new_x, dtype=np.float32)
+                                new_y = np.array(new_y, dtype=np.int32)
+                            with open(os.path.join(self.directory, "pickled_objects", "time_interpolated", f"batch_{self.num_batches}"), "wb") as outfile:
+                                pickle.dump({
+                                    "X": new_x,
+                                    "y": new_y
+                                }, outfile)
+                            new_x = []
+                            new_y = []
+                            num_loaded = 0
+                            self.num_batches += 1
+                        new_x.append([])                  
+                        to_y = [0] * self.n_classes
+                        to_y[curr_class] = 1
+                        new_y.append(to_y)
+                        self.total_samples += 1
+                        num_loaded += 1
+                        for k in range(self.max_people):
+                            new_x[-1].append(self.X[i][k][j:j + min_frames:self.skip_frames])
+            outer_loop.set_postfix()
+        self.pickle_time_interpolated_dir = os.path.join(self.directory, "pickled_objects", "time_interpolated")
+        if len(new_x) == 0:
+            return
         if convert_to_numpy:
-            self.X = np.array(new_x, dtype=np.float32)
-            self.y = np.array(new_y, dtype=np.int32)
+            new_x = np.array(new_x, dtype=np.float32)
+            new_y = np.array(new_y, dtype=np.int32)
+        with open(os.path.join(self.directory, "pickled_objects", "time_interpolated", f"batch_{self.num_batches}"), "wb") as outfile:
+            pickle.dump({
+                "X": new_x,
+                "y": new_y
+            }, outfile)
+        self.num_batches += 1
+                
+            
+        
             
     def split_train_and_test(self):
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y, test_size=self.test_split)
@@ -658,6 +699,8 @@ class RobberyDataset(GenericGaitDataset):
 
     def _reshape_curr_skel(self, skel_data, unmash_kp = False):
         reshaped_skel = []
+        print(dim(skel_data))
+        quit()
         loop = tqdm(skel_data)
         for sample in loop:
             reshaped_skel.append([])
@@ -666,7 +709,6 @@ class RobberyDataset(GenericGaitDataset):
                 if unmash_kp:
                     reshaped_skel.append([[],[]])
                     for l in person:
-                        # quit()
                         if l[1] == self.headpoint:
                             reshaped_skel[-1][l[0]].append([])
                         reshaped_skel[-1][l[0]][-1].append(l[2:])
@@ -681,16 +723,22 @@ class RobberyDataset(GenericGaitDataset):
     
     def reshape_skeletons(self, skel_data=None, unmash_kp = False):
         # Need skeleton to be shape (vid_seq, frame, keypoints, 2)
+        if not os.path.exists(os.path.join(self.directory, "pickled_objects", "reshaped")):
+            os.makedirs(os.path.join(self.directory, "pickled_objects", "reshaped"))
         reshaped_data = []
         if skel_data is None:
             loop = tqdm(range(len(os.listdir(self.pickle_cache_dir))))
             for i in loop:
                 if not os.path.exists(os.path.join(self.directory, "pickled_objects", "reshaped", f"{self.video_filenames[i]}")):
-                    with open(os.path.join(self.pickle_cache_dir, f"{self.video_filenames[i]}"), "rb") as infile:
-                        loaded_data = pickle.load(infile)
+                    with open(os.path.join(self.pickle_cache_dir, f"{self.video_filenames[i]}.pkl"), "rb") as infile:
+                        try:
+                            loaded_data = pickle.load(infile)
+                        except EOFError:
+                            self.video_filenames.pop(i)
+                            continue
                     skel_data = loaded_data["tmp_vids"] 
                     class_num = loaded_data["tmp_classes"]               
-                    with open(os.path.join(self.directory, "pickled_objects", "reshaped", f"{self.video_filenames[i]}"), "wb") as outfile:
+                    with open(os.path.join(self.directory, "pickled_objects", "reshaped", f"{self.video_filenames[i]}.pkl"), "wb") as outfile:
                         pickle.dump({
                             "tmp_vids": self._reshape_curr_skel(skel_data, unmash_kp=unmash_kp),
                             "tmp_classes": class_num
@@ -702,8 +750,12 @@ class RobberyDataset(GenericGaitDataset):
         
 
     def create_file_data(self, kp_dict, max_samples, max_classes):
-        if not os.path.exists(os.path.join(self.directory, f"cached/")):
-            os.makedirs(os.path.join(self.directory, "cached/"))
+        if not os.path.exists(os.path.join(self.directory, f"cached")):
+            os.makedirs(os.path.join(self.directory, "cached"))
+        if not os.path.exists(os.path.join(self.directory, f"pickled_objects")):
+            os.makedirs(os.path.join(self.directory, "pickled_objects"))
+        if not os.path.exists(os.path.join(self.directory, f"pickled_objects", "loading")):
+            os.makedirs(os.path.join(self.directory, "pickled_objects", "loading"))
         vid_filenames = []
         classe_names = os.listdir(self.directory)
         classe_names.remove("cached")
@@ -756,17 +808,19 @@ class RobberyDataset(GenericGaitDataset):
 
             for i, vid in enumerate(loop):
                 if os.path.exists(os.path.join(self.directory, "cached/", f"{vid}.txt")) and READ_FROM_CACHE:
-                    if not os.path.exists(os.path.join(self.directory, "pickled_objects", "loading",  f"{vid}.txt")):
+                    vid_filenames.append(vid)
+                    if not os.path.exists(os.path.join(self.directory, "pickled_objects", "loading",  f"{vid}.pkl")):
                         ret_val = read_from_cached_file(os.path.join(self.directory, "cached/", f"{vid}.txt"))
                         if ret_val is not None:
                             num_samples += 1#len(ret_val)
                             to_append= ret_val
                             if len(to_append) < self.max_people:
                                 os.remove(os.path.join(self.directory, "cached/", f"{vid}.txt"))
+                                vid_filenames.pop()
                             else:
                                 to_append = to_append[:self.max_people]
                                 tmp_vid_filenames.extend([os.path.join(self.directory,class_name, vid)] * len(to_append))
-                                with open(os.path.join(self.directory, "pickled_objects", "loading",  f"{vid}.txt"), "w") as outfile:
+                                with open(os.path.join(self.directory, "pickled_objects", "loading",  f"{vid}.pkl"), "wb") as outfile:
                                     pickle.dump({
                                         "tmp_vids": to_append,
                                         "tmp_classes": class_idx
@@ -782,18 +836,19 @@ class RobberyDataset(GenericGaitDataset):
                         if WRITE_TO_CACHE:
                             write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), c)
                         
-                        with open(os.path.join(self.directory, "pickled_objects", "loading",  f"{vid}.txt"), "w") as outfile:
+                        with open(os.path.join(self.directory, "pickled_objects", "loading",  f"{vid}.pkl"), "wb") as outfile:
                             pickle.dump({
                                 "tmp_vids": c,
                                 "tmp_classes": class_idx
                             }, outfile)
+                        vid_filenames.append(vid)
                     else:
                         if WRITE_TO_CACHE:
                             write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), "")
                 if num_samples >= maximum_num_samples:
                     print("Reached Maximum Samples")
                     break
-
+             
             
         # i = 0
         # j = 0
@@ -813,6 +868,7 @@ class RobberyDataset(GenericGaitDataset):
         self.video_filenames = vid_filenames
         self.pickle_cache_dir = os.path.join(self.directory, "pickled_objects", "loading")
         self.classes = classe_names
+        self.num_classes = len(self.classes)
         return
 
 
@@ -919,5 +975,18 @@ class RobberyDataset(GenericGaitDataset):
         T = 2
         V = 3
         M = 1
-        X = X.transpose(N, C, T, V, M)
-        return torch.tensor(X, dtype=torch.float32)
+        loop = tqdm(range(len(os.listdir(self.pickle_time_interpolated_dir))), desc="Adjusting Input Data")
+        for i in loop:
+            if not os.path.exists(os.path.join(self.directory, "pickled_objects", "final_input", f"{self.video_filenames[i]}")):
+                with open(os.path.join(self.pickle_time_interpolated_dir, f"{self.video_filenames[i]}"), "rb") as infile:
+                    loaded_data = pickle.load(infile)
+                X = loaded_data["X"] 
+                y = loaded_data["y"]               
+                with open(os.path.join(self.directory, "pickled_objects", "final_input", f"{self.video_filenames[i]}"), "wb") as outfile:
+                    pickle.dump({
+                        "X": X.transpose(N, C, T, V, M),
+                        "y": y
+                    }, outfile)
+            loop.set_postfix()
+
+        # return torch.tensor(X, dtype=torch.float32)
