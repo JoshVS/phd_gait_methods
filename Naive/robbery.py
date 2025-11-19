@@ -100,13 +100,13 @@ class TrainValDataset(Dataset):
         return self.X[idx], self.y[idx]
 
 my_ds = RobberyDataset(generate_test_video=None, 
-                    max_samples=0.25,
+                    max_samples=None,
                     num_timesteps=30,
                     skip_frames=SKIP_FRAMES,
                     max_people=2,
                     max_samples_per_video=150)
-print(f"Dataset size: {get_deep_size(my_ds)/1e9} GB")
-quit()
+# print(f"Dataset size: {get_deep_size(my_ds)/1e9} GB")
+# quit()
 
 VAL_SIZE = 0.3
 X_train, X_val, y_train, y_val = train_test_split(my_ds.X, my_ds.y, test_size=VAL_SIZE, shuffle=True, stratify=my_ds.stratify_y)

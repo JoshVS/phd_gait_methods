@@ -1,4 +1,5 @@
 import os
+import pickle
 import cv2
 
 import numpy as np
@@ -383,7 +384,7 @@ class RobberyDataset(GenericGaitDataset):
 
     def __init__(self, directory='../../../Datasets/RobberyDataset/Dataset/Train-Set', max_samples=None, min_samples=5, t_interp=6, num_dims=2, generate_test_video=None, 
                  extract_steps=False, test_split=0.1, val_split=0.3, max_classes=None, num_timesteps=12, exclude_classes=None, skip_frames=1,
-                 max_people=10, max_samples_per_video=100):
+                 max_people=10, max_samples_per_video=100, pickle_batch=100):
         
         super().__init__(directory=directory, max_samples=max_samples, t_interp=t_interp, num_dims=num_dims, generate_test_video=generate_test_video, extract_steps=extract_steps)
         self.max_people = max_people
@@ -395,6 +396,7 @@ class RobberyDataset(GenericGaitDataset):
         self.test_split = test_split
         self.max_classes = max_classes
         self.num_timesteps = num_timesteps
+        self.pickle_batch = pickle_batch
         self.initialise_stuff()
 
     def initialise_stuff(self):
@@ -403,7 +405,7 @@ class RobberyDataset(GenericGaitDataset):
         
         self.kp_indices = self._get_file_data(self.max_samples, self.max_classes) 
         if self.directory is not None:
-            self.skel_data, self.labels = self.create_file_data(self.kp_indices, self.max_samples, self.max_classes)
+            self.create_file_data(self.kp_indices, self.max_samples, self.max_classes)
         
         
         
@@ -634,12 +636,8 @@ class RobberyDataset(GenericGaitDataset):
         self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X_train, self.y_train, test_size=self.val_split)
 
 
-    def reshape_skeletons(self, skel_data=None, unmash_kp = False):
-        if skel_data is None:
-            skel_data = self.skel_data
-        # Need skeleton to be shape (vid_seq, frame, keypoints, 2)
+    def _reshape_curr_skel(self, skel_data, unmash_kp = False):
         reshaped_skel = []
-        reshaped_z_data = []
         loop = tqdm(skel_data)
         for sample in loop:
             reshaped_skel.append([])
@@ -660,16 +658,28 @@ class RobberyDataset(GenericGaitDataset):
                         for k in t:
                             reshaped_skel[-1][-1][-1].append(k[2:])
         return reshaped_skel
+    
+    def reshape_skeletons(self, skel_data=None, unmash_kp = False):
+        # Need skeleton to be shape (vid_seq, frame, keypoints, 2)
+        reshaped_data = []
+        if skel_data is None:
+            loop = tqdm(range(len(os.listdir(self.pickle_cache_dir))))
+            for i in loop:
+                with open(os.path.join(self.pickle_cache_dir, f"{self.video_filenames[i]}"), "rb") as infile:
+                    loaded_data = pickle.load(infile)
+                skel_data = loaded_data["tmp_vids"]                
+                reshaped_data.extend(self._reshape_curr_skel(skel_data, unmash_kp=unmash_kp))
+        else:
+            return self.reshape_curr_skel(skel_data, unmash_kp=unmash_kp)
+        
 
     def create_file_data(self, kp_dict, max_samples, max_classes):
         if not os.path.exists(os.path.join(self.directory, f"cached/")):
             os.makedirs(os.path.join(self.directory, "cached/"))
-        videos = []
-        z_data = []
         vid_filenames = []
-        global_guilty_people = []
         classe_names = os.listdir(self.directory)
         classe_names.remove("cached")
+        classe_names.remove("pickled_objects")
         # classe_names.remove("annotations.txt")
         if self.exclude_classes is not None:
             tmp = {}
@@ -685,7 +695,6 @@ class RobberyDataset(GenericGaitDataset):
             classe_names = list(tmp.keys())
         if max_classes is not None:
             classe_names = classe_names[:max_classes] if len(classe_names) > max_classes else classe_names
-        classes = []
 
         
         for class_idx ,class_name in enumerate(classe_names):
@@ -707,32 +716,33 @@ class RobberyDataset(GenericGaitDataset):
                 maximum_num_samples = max_samples
             else:
                 maximum_num_samples = int(len(vids))
-            class_vids = []
-            z_class_vids = []
-            class_vid_filenames = []
-
             loop = tqdm(vids)
             if not os.path.exists(os.path.join(self.directory, "cached/")):
                 os.makedirs(os.path.join(self.directory, "cached/"))
+            if not os.path.exists(os.path.join(self.directory, "pickled_objects/")):
+                os.makedirs(os.path.join(self.directory, "pickled_objects/"))
             num_samples = 0
             tmp_z = []
             tmp_vids = []
             tmp_vid_filenames = []
-            tmp_classes = []
 
             for i, vid in enumerate(loop):
                 if os.path.exists(os.path.join(self.directory, "cached/", f"{vid}.txt")) and READ_FROM_CACHE:
-                    ret_val = read_from_cached_file(os.path.join(self.directory, "cached/", f"{vid}.txt"))
-                    if ret_val is not None:
-                        num_samples += 1#len(ret_val)
-                        to_append= ret_val
-                        if len(to_append) < self.max_people:
-                            os.remove(os.path.join(self.directory, "cached/", f"{vid}.txt"))
-                        else:
-                            to_append = to_append[:self.max_people]
-                            tmp_vids.append(to_append)
-                            tmp_vid_filenames.extend([os.path.join(self.directory,class_name, vid)] * len(to_append))
-                            tmp_classes.append(class_idx)
+                    if not os.path.exists(os.path.join(self.directory, "pickled_objects", "loading",  f"{vid}.txt")):
+                        ret_val = read_from_cached_file(os.path.join(self.directory, "cached/", f"{vid}.txt"))
+                        if ret_val is not None:
+                            num_samples += 1#len(ret_val)
+                            to_append= ret_val
+                            if len(to_append) < self.max_people:
+                                os.remove(os.path.join(self.directory, "cached/", f"{vid}.txt"))
+                            else:
+                                to_append = to_append[:self.max_people]
+                                tmp_vid_filenames.extend([os.path.join(self.directory,class_name, vid)] * len(to_append))
+                                with open(os.path.join(self.directory, "pickled_objects", "loading",  f"{vid}.txt"), "w") as outfile:
+                                    pickle.dump({
+                                        "tmp_vids": to_append,
+                                        "tmp_classes": class_idx
+                                    }, outfile)
                         
                 if not os.path.exists(os.path.join(self.directory, "cached/", f"{vid}.txt")) or not READ_FROM_CACHE:
                     print(f"[{class_idx + 1} / {len(classe_names)}]File cached/{vid}.txt doesn't exist, creating")
@@ -740,22 +750,22 @@ class RobberyDataset(GenericGaitDataset):
                     c = get_kp_from_video(filename, kp_dict, max_people=self.max_people)
                     if c is not None:
                         num_samples += 1
-                        tmp_vids.append(c)
                         tmp_vid_filenames.append(filename)
-                        tmp_classes.append(class_idx)
                         if WRITE_TO_CACHE:
                             write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), c)
+                        
+                        with open(os.path.join(self.directory, "pickled_objects", "loading",  f"{vid}.txt"), "w") as outfile:
+                            pickle.dump({
+                                "tmp_vids": c,
+                                "tmp_classes": class_idx
+                            }, outfile)
                     else:
                         if WRITE_TO_CACHE:
                             write_to_file(os.path.join(self.directory, "cached/", f"{vid}.txt"), "")
                 if num_samples >= maximum_num_samples:
                     print("Reached Maximum Samples")
                     break
-            if num_samples >= self.min_samples:
-                videos.extend(tmp_vids)
-                classes.extend(tmp_classes)
-                vid_filenames.extend(tmp_vid_filenames)
-                z_class_vids.extend(tmp_z)
+
             
         # i = 0
         # j = 0
@@ -773,9 +783,9 @@ class RobberyDataset(GenericGaitDataset):
        
 
         self.video_filenames = vid_filenames
+        self.pickle_cache_dir = os.path.join(self.directory, "pickled_objects", "loading")
         self.classes = classe_names
-        self.guilty_people = global_guilty_people
-        return videos, classes
+        return
 
 
     def _get_file_data(self, max_samples, max_classes):

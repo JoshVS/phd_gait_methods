@@ -78,7 +78,6 @@ my_ds = ShopLiftingDataset(generate_test_video=1,
                     skip_frames=SKIP_FRAMES)
 
 
-quit()
 
 VAL_SIZE = 0.3
 X_train, X_val, y_train, y_val = train_test_split(my_ds.X, my_ds.y, test_size=VAL_SIZE, shuffle=True, stratify=my_ds.stratify_y)
