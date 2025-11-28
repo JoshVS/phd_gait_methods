@@ -34,7 +34,7 @@ def get_deep_size(obj, seen=None):
 
     return size
 
-SKIP_FRAMES = 5
+SKIP_FRAMES = 1
 
 
 def manual_batch(arr, batch_size=BATCH_SIZE):
@@ -72,7 +72,7 @@ class CASIATorchDataset(Dataset):
 class TrainValDataset(Dataset):
     def __init__(self, ds, X, y, batch_size = BATCH_SIZE):
         self.ds = ds
-        self.strat = ds.stratify_y
+        # self.strat = ds.stratify_y
         self.batch_size = batch_size
         self.n_classes = ds.n_classes
         self.in_edge = ds.in_edge
@@ -112,8 +112,9 @@ my_ds = RobberyDataset(generate_test_video=None,
 num_samples = my_ds.total_samples
 num_pickled_batches = my_ds.num_batches
 
+
 VAL_SIZE = 0.3
-X_train, X_val, y_train, y_val = train_test_split(my_ds.X, my_ds.y, test_size=VAL_SIZE, shuffle=True, stratify=my_ds.stratify_y)
+X_train, X_val, y_train, y_val = train_test_split(my_ds.X, my_ds.y, test_size=VAL_SIZE, shuffle=True, stratify=my_ds.y)
 train = TrainValDataset(my_ds, X_train, y_train)
 val = TrainValDataset(my_ds, X_val, y_val)
 

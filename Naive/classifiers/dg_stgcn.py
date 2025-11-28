@@ -382,7 +382,7 @@ class DGSTGCN:
         metrics["scalar"] = {}
         X, y = sample
         X = X.to(device)
-        y = y.to(device).view(-1, self.n_classes)  # Flatten the labels to match the output shape of the classifier
+        y = y.to(device).view(-1, self.n_classes).float()  # Flatten the labels to match the output shape of the classifier
         # print(y.size())
         optimizer.zero_grad()
         outputs = classifier(X).float()
@@ -418,13 +418,15 @@ class DGSTGCN:
         val_metrics["scalar"] = {}
         X, y = sample
         X = X.to(device)
-        y = y.to(device).view(-1, self.n_classes)  # Flatten the labels to match the output shape of the classifier
+        y = y.to(device).view(-1, self.n_classes).float()  # Flatten the labels to match the output shape of the classifier
         
         with torch.no_grad():
             val_out = classifier(X).view(-1, self.n_classes).float()
             predictions = val_out.argmax(axis=1)
             true_labels = y.argmax(axis=1)
             # predictions = predictions.view(-1, predictions.size(2))  # Flatten the predictions to match the output shape of the classifier
+            # print(y.dtype)
+            # quit()
             val_loss = self.loss_fn(val_out, y)
             val_metrics["scalar"]["val_loss"] = val_loss.item()
             for k in self.tracking_metrics.keys():
