@@ -43,7 +43,7 @@ MODEL_NAME = "model_checkpoints"
 TUNE = False
 DROPOUT = 0.9
 WEIGHT_DECAY = 1e-2
-WEIGHTS_PATH = "shoplifting.pth"
+WEIGHTS_PATH = "robbery.pth"
 
 if not os.path.exists(os.path.join("weights", "train", MODEL_NAME)):
     os.makedirs(os.path.join("weights", "train", MODEL_NAME))
@@ -58,7 +58,7 @@ L3 = 3
 
 BATCH_SIZE=32
 
-EPOCHS = 40
+EPOCHS = 10
 LR = 1e-4
 
 def force_cudnn_initialization():
@@ -314,10 +314,34 @@ class GeminiDGSTGCN(nn.Module):
         return softmax(self.fc(x), dim=-1) # in shape: (batch, times, num_classes)
 
 class DGSTGCN:
-    def __init__(self, ds=None, loss_fn=torch.nn.functional.cross_entropy, model_name=MODEL_NAME, weights_path=None, timesteps=None):
+    def __init__(self, ds=None, loss_fn=torch.nn.functional.cross_entropy, model_name=MODEL_NAME, weights_path=None, timesteps=None, testing=False):
         
         torch.set_default_dtype(torch.float32)
         self.model_name = model_name
+
+        if weights_path is not None and testing:
+            self.graph = create_ultralytics_graph()
+            model_weights = torch.load(weights_path, map_location=device )
+            self.classifier = GeminiDGSTGCN(2,17, 1, 2, self.graph, timesteps).to(device)
+            self.classifier.load_state_dict(model_weights)
+            print(f"Loaded model from {weights_path}")
+            scalar_metrics = {"train":{},
+                            "val":{}}
+            
+            test_metrics = {"scalar": {}, "image": {}}
+            # print(self.test_set.X[0].size())
+            # quit()
+            test_iter = iter(self.test_set)
+            for idx, test_sample in enumerate(test_iter):
+                # print(test_sample[0].size())
+                # quit()
+                test_metrics = self._test_step(test_sample, test_metrics)
+                for k in test_metrics["scalar"].keys():
+                    if k not in scalar_metrics["test"].keys():
+                        scalar_metrics["test"][k] = 0
+                    scalar_metrics["test"][k] += test_metrics["scalar"][k] / len(self.test_set.X)
+
+            return
 
         if weights_path is not None:
             self.graph = create_ultralytics_graph()
@@ -445,6 +469,38 @@ class DGSTGCN:
         
         return val_metrics
 
+    def _test_step(self, sample, test_metrics, classifier=None):
+        if classifier is None:
+            classifier = self.classifier
+        test_metrics["scalar"] = {}
+        X, y = sample
+        X = X.to(device)
+        y = y.to(device).view(-1, self.n_classes).float()  # Flatten the labels to match the output shape of the classifier
+        
+        with torch.no_grad():
+            test_out = classifier(X).view(-1, self.n_classes).float()
+            predictions = test_out.argmax(axis=1)
+            true_labels = y.argmax(axis=1)
+            # predictions = predictions.view(-1, predictions.size(2))  # Flatten the predictions to match the output shape of the classifier
+            # print(y.dtype)
+            # quit()
+            test_loss = self.loss_fn(test_out, y)
+            test_metrics["scalar"]["test_loss"] = test_loss.item()
+            for k in self.tracking_metrics.keys():
+                test_metrics["scalar"]["test_" + k] = self.tracking_metrics[k](true_labels, predictions)
+
+            cm = confusion_matrix(true_labels.cpu().numpy(), predictions.cpu().numpy(), labels = np.array(list(range(self.n_classes))))
+            if "test_conf_mat" not in test_metrics["image"]:
+                # print(cm.shape)
+                test_metrics["image"]["test_conf_mat"]  = cm
+
+            else:
+                # print(cm.shape)
+                # print(test_metrics["image"]["test_conf_mat"].shape, cm.shape)
+                test_metrics["image"]["test_conf_mat"][:cm.shape[0], :cm.shape[1]]  += cm
+
+        
+        return test_metrics
 
     def train(self,  lr=LR, momentum=0.9, epochs=EPOCHS, batch_size=BATCH_SIZE):
         

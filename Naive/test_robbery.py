@@ -1,11 +1,40 @@
-from classifiers.shoplifting_classifier import STGCN, BATCH_SIZE
+from classifiers.dg_stgcn import DGSTGCN, BATCH_SIZE
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 # from copy_dataset_loaders.CASIA_dataset import CASIADataset
-from dataset_loaders.ShopLiftingDataset import ShopLiftingDataset
-import dataset_loaders.ShopLiftingDataset
+from dataset_loaders.RobberyDataset import RobberyDataset
 
-SKIP_FRAMES = 5
+import sys
+
+def get_deep_size(obj, seen=None):
+    """Recursively calculates the deep size of an object in bytes."""
+    if seen is None:
+        seen = set()
+
+    obj_id = id(obj)
+    if obj_id in seen:
+        return 0  # Object already counted
+
+    seen.add(obj_id)
+    size = sys.getsizeof(obj)
+
+    if isinstance(obj, dict):
+        size += sum(get_deep_size(v, seen) for v in obj.values())
+        size += sum(get_deep_size(k, seen) for k in obj.keys())
+    elif isinstance(obj, (list, tuple, set, frozenset)):
+        size += sum(get_deep_size(item, seen) for item in obj)
+    elif hasattr(obj, '__dict__'):  # Custom objects
+        size += get_deep_size(obj.__dict__, seen)
+    elif hasattr(obj, '__slots__'):  # Objects with __slots__
+        for slot in obj.__slots__:
+            try:
+                size += get_deep_size(getattr(obj, slot), seen)
+            except AttributeError:
+                pass # Slot might not be set
+
+    return size
+
+SKIP_FRAMES = 1
 
 
 def manual_batch(arr, batch_size=BATCH_SIZE):
@@ -43,7 +72,7 @@ class CASIATorchDataset(Dataset):
 class TrainValDataset(Dataset):
     def __init__(self, ds, X, y, batch_size = BATCH_SIZE):
         self.ds = ds
-        self.strat = ds.stratify_y
+        # self.strat = ds.stratify_y
         self.batch_size = batch_size
         self.n_classes = ds.n_classes
         self.in_edge = ds.in_edge
@@ -70,22 +99,25 @@ class TrainValDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
-my_ds = ShopLiftingDataset(generate_test_video=None, 
+my_ds = RobberyDataset(directory='../../../Datasets/RobberyDataset/Dataset/Test-Set',
+                       generate_test_video=None, 
                     max_samples=None,
-                    max_classes=None, 
-                    min_samples = 0,  
-                    num_timesteps=30,
-                    skip_frames=SKIP_FRAMES)
+                    num_timesteps=120,
+                    skip_frames=SKIP_FRAMES,
+                    max_people=2,
+                    max_samples_per_video=150)
+# print(f"Dataset size: {get_deep_size(my_ds)/1e9} GB")
+# quit()
+
+# SPLIT DATASET MANUALLY BATCHED
+num_samples = my_ds.total_samples
+num_pickled_batches = my_ds.num_batches
 
 
+ds = TrainValDataset(my_ds, my_ds.X, my_ds.y)
 
-VAL_SIZE = 0.3
-X_train, X_val, y_train, y_val = train_test_split(my_ds.X, my_ds.y, test_size=VAL_SIZE, shuffle=True, stratify=my_ds.stratify_y)
-train = TrainValDataset(my_ds, X_train, y_train)
-val = TrainValDataset(my_ds, X_val, y_val)
 
-ds = (train, val)
 
 # ds = CASIATorchDataset(CASIADataset(generate_test_video=None, max_samples=10))
 # print(dsiter.next())
-classifier = STGCN(ds)
+classifier = DGSTGCN(ds, weights_path='weights/finished/robbery.pth', testing=True)

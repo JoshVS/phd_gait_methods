@@ -101,7 +101,7 @@ class TrainValDataset(Dataset):
 
 my_ds = RobberyDataset(generate_test_video=None, 
                     max_samples=None,
-                    num_timesteps=30,
+                    num_timesteps=120,
                     skip_frames=SKIP_FRAMES,
                     max_people=2,
                     max_samples_per_video=150)
