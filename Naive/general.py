@@ -1,4 +1,4 @@
-from classifiers.dg_stgcn import DGSTGCN, BATCH_SIZE
+from classifiers.unsupervised import SuspiciousActivityMonitor, BATCH_SIZE
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 # from copy_dataset_loaders.CASIA_dataset import CASIADataset
@@ -70,19 +70,16 @@ class CASIATorchDataset(Dataset):
         return self.X[idx], self.y[idx]
 
 class TrainValDataset(Dataset):
-    def __init__(self, ds, X, y, batch_size = BATCH_SIZE):
+    def __init__(self, ds, X, batch_size = BATCH_SIZE):
         self.ds = ds
         # self.strat = ds.stratify_y
         self.batch_size = batch_size
-        self.n_classes = ds.n_classes
         self.in_edge = ds.in_edge
-        self.n_point = ds.X.shape[3]
-        self.classes = ds.classes
-        self.num_timesteps = ds.X.shape[2]
-        self.in_channels = ds.X.shape[1]
-        self.num_person = ds.X.shape[-1]
+        self.n_point = 17
+        self.num_timesteps = 120
+        self.in_channels = 2
+        self.num_person = 2
         self.X = manual_batch(X)
-        self.y = manual_batch(y)
         self.num_batches = len(self.X)
         self.length = sum([x.size()[0] for x in self.X])
         # print(X.size()[2])
@@ -91,13 +88,12 @@ class TrainValDataset(Dataset):
     
     def to(self, device):
         self.X = [x.to(device) for x in self.X]
-        self.y = [y.to(device) for y in self.y]
     
     def __len__(self):
         return self.length
     
     def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
+        return self.X[idx]
 
 my_ds = SuspiciousDataset(generate_test_video=None, 
                     max_samples=None,
@@ -107,21 +103,18 @@ my_ds = SuspiciousDataset(generate_test_video=None,
                     max_samples_per_video=150)
 # print(f"Dataset size: {get_deep_size(my_ds)/1e9} GB")
 # quit()
-print("ALL DONE")
-quit()
-
 # SPLIT DATASET MANUALLY BATCHED
 num_samples = my_ds.total_samples
 num_pickled_batches = my_ds.num_batches
 
 
 VAL_SIZE = 0.3
-X_train, X_val, y_train, y_val = train_test_split(my_ds.X, my_ds.y, test_size=VAL_SIZE, shuffle=True, stratify=my_ds.y)
-train = TrainValDataset(my_ds, X_train, y_train)
-val = TrainValDataset(my_ds, X_val, y_val)
+X_train, X_val= train_test_split(my_ds.X,  test_size=VAL_SIZE, shuffle=True, stratify=None)
+train = TrainValDataset(my_ds, X_train)
+val = TrainValDataset(my_ds, X_val)
 
 ds = (train, val)
 
 # ds = CASIATorchDataset(CASIADataset(generate_test_video=None, max_samples=10))
 # print(dsiter.next())
-classifier = DGSTGCN(ds)
+classifier = SuspiciousActivityMonitor(ds)

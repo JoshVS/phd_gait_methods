@@ -959,7 +959,7 @@ class SuspiciousDataset(GenericGaitDataset):
             if not save:
                 # print(X_data.shape, y_data.shape)
                 # quit()
-                self.X = torch.tensor(X_data)
+                self.X = torch.tensor(X_data).reshape(X_data.shape[0], -1, 34)
                 return
         else:
             return X.transpose(N, C, T, V, M)
